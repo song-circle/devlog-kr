@@ -14,7 +14,7 @@ public partial class MainWindow : Window
     private readonly AppSettings _settings = AppSettings.Load();
     private string? _updateUrl;
     // 요약에 쓰는 가장 최근 결과 (앱을 다시 켜면 저장된 결과에서 읽음)
-    private JsonElement? _info, _check, _score, _throttle, _internet;
+    private JsonElement? _info, _check, _score, _throttle, _internet, _fp;
 
     // 점수 항목 키 → 화면 이름
     private static readonly Dictionary<string, string> ItemNames = new()
@@ -38,6 +38,8 @@ public partial class MainWindow : Window
             _score = _store.LoadLatest("score");
             _throttle = _store.LoadLatest("throttle");
             _internet = _store.LoadLatest("internet");
+            _fp = _store.LoadLatest("fp");
+            if (_fp is JsonElement fp) ShowFp(fp);
             if (_check is JsonElement c) ShowFindings(Diagnosis.FromCheck(c), f => !f.Title.Contains("쓰로틀링"));
             if (_throttle is JsonElement t) ShowFindings(new[] { Diagnosis.FromThrottle(t) }, f => f.Title.Contains("쓰로틀링"));
             if (_score is JsonElement sc) ShowScore(sc);
@@ -76,7 +78,7 @@ public partial class MainWindow : Window
         if (_runner is null)
         {
             CpuText.Text = "cpu-bench-runner.exe를 찾지 못했습니다. 앱과 같은 폴더에 있어야 합니다.";
-            FullButton.IsEnabled = CheckButton.IsEnabled = ScoreButton.IsEnabled = ThrottleButton.IsEnabled = false;
+            FullButton.IsEnabled = CheckButton.IsEnabled = ScoreButton.IsEnabled = ThrottleButton.IsEnabled = FpButton.IsEnabled = false;
             return;
         }
         var r = await _runner.RunAsync("info --json");
@@ -101,7 +103,7 @@ public partial class MainWindow : Window
 
     private void SetBusy(bool busy, string status)
     {
-        FullButton.IsEnabled = CheckButton.IsEnabled = ScoreButton.IsEnabled = ThrottleButton.IsEnabled = NetButton.IsEnabled = !busy;
+        FullButton.IsEnabled = CheckButton.IsEnabled = ScoreButton.IsEnabled = ThrottleButton.IsEnabled = NetButton.IsEnabled = FpButton.IsEnabled = !busy;
         Progress.Visibility = busy ? Visibility.Visible : Visibility.Hidden;
         Progress.IsIndeterminate = busy;
         StatusText.Text = status;
@@ -263,6 +265,64 @@ public partial class MainWindow : Window
         bool disturbed = j.TryGetProperty("disturbed", out var d) && d.GetBoolean();
         return disturbed ? " · 측정 중 다른 프로그램이 CPU를 많이 써서 결과가 낮게 나왔을 수 있습니다. 다른 프로그램을 닫고 다시 재 보세요."
              : retries > 0 ? $" · 다른 프로그램 때문에 {retries}회를 다시 쟀습니다." : "";
+    }
+
+    // 부동소수점 측정: 행렬곱·N-body를 싱글·멀티로. 점수 v1에는 넣지 않고 따로 보여 준다.
+    private static readonly (string Workload, bool Multi, string Label)[] FpRuns =
+    {
+        ("matmul", false, "행렬곱 (싱글)"), ("nbody", false, "물체 인력 계산 (싱글)"),
+        ("matmul", true, "행렬곱 (멀티)"), ("nbody", true, "물체 인력 계산 (멀티)"),
+    };
+
+    private async void FpButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_runner is null) return;
+        SetBusy(true, "부동소수점 측정 중…");
+        Progress.IsIndeterminate = false;
+        var items = new List<object>();
+        for (int i = 0; i < FpRuns.Length; ++i)
+        {
+            var (w, multi, label) = FpRuns[i];
+            Progress.Value = (double)i / FpRuns.Length;
+            StatusText.Text = $"부동소수점 측정 중… {i + 1}/{FpRuns.Length} {label}";
+            var r = await _runner.RunAsync($"run fp --workload {w}{(multi ? " --mt" : "")} --runs 3 --duration-ms 1000 --json");
+            if (r.Json is null)
+            {
+                SetBusy(false, $"부동소수점 측정 실패: {r.StdErr.Trim()}");
+                return;
+            }
+            var j = r.Json.RootElement;
+            items.Add(new
+            {
+                workload = w, multi, threads = j.GetProperty("threads").GetInt32(),
+                value = j.GetProperty("median_value").GetDouble(), cv = j.GetProperty("cv_percent").GetDouble(),
+                variant = j.GetProperty("variant").GetString(), checksum_ok = j.GetProperty("checksum_ok").GetBoolean(),
+            });
+        }
+        var json = JsonSerializer.SerializeToElement(new { module_version = "0.1.0", items });
+        _store.Save("fp", json);
+        _fp = json;
+        ShowFp(json);
+        SetBusy(false, "부동소수점 측정 완료");
+    }
+
+    private void ShowFp(JsonElement j)
+    {
+        var items = j.GetProperty("items").EnumerateArray().ToList();
+        FpHint.Visibility = Visibility.Collapsed;
+        FpItems.ItemsSource = items.Select(it =>
+        {
+            string w = it.GetProperty("workload").GetString() ?? "";
+            bool multi = it.GetProperty("multi").GetBoolean();
+            string label = FpRuns.FirstOrDefault(r => r.Workload == w && r.Multi == multi).Label ?? w;
+            string value = it.GetProperty("checksum_ok").GetBoolean() ? $"{it.GetProperty("value").GetDouble():N0} 회/초" : "계산 오류";
+            return new { Label = label, Value = value };
+        }).ToList();
+        string variant = items.Count > 0 ? items[0].GetProperty("variant").GetString() ?? "" : "";
+        bool allOk = items.All(it => it.GetProperty("checksum_ok").GetBoolean());
+        FpWords.Text = (allOk ? "" : "⚠ 계산 결과가 기대값과 달랐습니다. 오버클럭이나 메모리 설정이 불안정할 수 있습니다.\n") +
+                       (variant == "avx2" ? "이 CPU는 AVX2(한 번에 실수 4개 계산)로 쟀습니다." : "이 CPU는 AVX2가 없어 일반 방식으로 쟀습니다.") +
+                       " 1회 = 128×128 행렬곱 한 번 / 물체 256개의 인력 한 번 계산. 다른 PC와 비교하는 기능은 아직 없습니다.";
     }
 
     private async Task<bool> RunThrottleAsync(string step)

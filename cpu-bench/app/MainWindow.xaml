@@ -121,6 +121,34 @@
                     </Border>
                     <Border Style="{StaticResource Card}">
                         <StackPanel>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock FontSize="18" FontWeight="Bold" VerticalAlignment="Center"><Run Text="부동소수점" /><Run Text="  점수 미반영 · 새 측정" FontSize="13" FontWeight="Normal" Foreground="{StaticResource Muted}" /></TextBlock>
+                                <Button x:Name="FpButton" Grid.Column="1" Content="측정 (약 20초)" Click="FpButton_Click" Background="{StaticResource Panel}" Foreground="{StaticResource Text}" FontWeight="Normal" Padding="12,6" />
+                            </Grid>
+                            <TextBlock x:Name="FpHint" Margin="0,8,0,0" Foreground="{StaticResource Muted}" Text="실수 계산(행렬곱, 물체 사이의 인력 계산) 속도를 잽니다. 지금 점수에는 들어가지 않습니다." TextWrapping="Wrap" />
+                            <ItemsControl x:Name="FpItems" Margin="0,8,0,0">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid Margin="0,3">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="{Binding Label}" />
+                                            <TextBlock Grid.Column="1" Text="{Binding Value}" FontFamily="Cascadia Mono, Consolas" Foreground="{StaticResource Muted}" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <TextBlock x:Name="FpWords" Margin="0,8,0,0" FontSize="13" Foreground="{StaticResource Muted}" Text="" TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Border>
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
                             <TextBlock Text="기록" FontSize="18" FontWeight="Bold" />
                             <TextBlock x:Name="HistoryHint" Margin="0,8,0,0" Foreground="{StaticResource Muted}" Text="점수를 측정하면 이 PC에 기록이 남습니다." />
                             <ItemsControl x:Name="History" Margin="0,8,0,0">
