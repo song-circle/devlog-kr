@@ -8,9 +8,28 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <new>
 #include <vector>
 
 namespace fpk {
+
+// 64바이트(캐시 라인) 정렬 할당자. 기본 new는 16바이트 정렬이라, 32바이트 AVX2 로드·저장이 실행마다
+// 캐시 라인 경계에 걸리거나 안 걸려 행렬곱 속도가 프로세스마다 최대 35% 달랐다(버그 015).
+template <class T>
+struct AlignedAlloc {
+    using value_type = T;
+    static constexpr std::align_val_t kAlign{64};
+    AlignedAlloc() = default;
+    template <class U>
+    AlignedAlloc(const AlignedAlloc<U>&) noexcept {}
+    T* allocate(size_t n) { return static_cast<T*>(::operator new(n * sizeof(T), kAlign)); }
+    void deallocate(T* p, size_t) noexcept { ::operator delete(p, kAlign); }
+    template <class U>
+    bool operator==(const AlignedAlloc<U>&) const noexcept { return true; }
+    template <class U>
+    bool operator!=(const AlignedAlloc<U>&) const noexcept { return false; }
+};
+using DVec = std::vector<double, AlignedAlloc<double>>;
 
 constexpr size_t kMatN   = 128;  // 행렬곱: 128x128 double (행렬 하나 128 KiB, A·B·C 합쳐 L2에 들어가는 크기)
 constexpr size_t kBodies = 256;  // N-body: 물체 256개, 작업 단위 하나 = 모든 물체의 가속도 1회
@@ -20,8 +39,8 @@ enum class Workload { MatMul, NBody };
 enum class Path { Scalar, Avx2 };
 
 struct Input {
-    std::vector<double> a, b;           // kMatN * kMatN, 행 우선
-    std::vector<double> x, y, z, m;     // kBodies
+    DVec a, b;           // kMatN * kMatN, 행 우선
+    DVec x, y, z, m;     // kBodies
 };
 
 Input make_input(uint64_t seed);

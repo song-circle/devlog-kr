@@ -64,3 +64,4 @@ add_executable(netlink_test netlink_test.cpp ${CMAKE_SOURCE_DIR}/runner/netlink.
 target_include_directories(netlink_test PRIVATE ${CMAKE_SOURCE_DIR}/runner)
 target_link_libraries(netlink_test PRIVATE bench_options iphlpapi)
 add_test(NAME netlink COMMAND netlink_test)
+

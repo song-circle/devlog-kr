@@ -19,7 +19,7 @@ struct BenchContext {
     fpk::Path path = fpk::Path::Scalar;
     fpk::Input input;
     uint64_t expected = 0;  // bench_init에서 한 번 계산한 기준 digest
-    std::vector<std::vector<double>> out;  // 워커별 출력 버퍼
+    std::vector<fpk::DVec> out;  // 워커별 출력 버퍼 (64바이트 정렬)
 };
 
 namespace {
@@ -74,7 +74,7 @@ BENCH_EXPORT int32_t BENCH_CALL bench_init(const BenchConfig* config, BenchConte
         ctx->workload = w;
         ctx->path = p;
         ctx->input = fpk::make_input(cfg.seed);
-        ctx->out.assign(cfg.threads, std::vector<double>(fpk::out_size(w)));
+        ctx->out.assign(cfg.threads, fpk::DVec(fpk::out_size(w)));
         ctx->expected = fpk::run_unit(w, p, ctx->input, ctx->out[0].data());
         *out_ctx = ctx;
         return BENCH_OK;
