@@ -16,6 +16,15 @@ add_test(NAME runner_mem_copy COMMAND cpu-bench-runner run mem --workload copy -
 add_test(NAME runner_mem_write COMMAND cpu-bench-runner run mem --workload write --size 64M --threads 2 --duration-ms 200 --runs 2)
 add_test(NAME runner_mem_sweep COMMAND cpu-bench-runner sweep mem --workload latency --from 16K --to 4M --duration-ms 100 --runs 2)
 
+# 부동소수점 커널: scalar·avx2 경로 모두 Python 독립 구현과 비트 단위로 같아야 한다
+add_executable(fp_kernels_test fp_kernels_test.cpp)
+target_link_libraries(fp_kernels_test PRIVATE fp_kernels bench_options)
+add_test(NAME fp_kernels COMMAND fp_kernels_test)
+add_test(NAME runner_fp_matmul COMMAND cpu-bench-runner run fp --duration-ms 200 --runs 2)
+add_test(NAME runner_fp_nbody_mt COMMAND cpu-bench-runner run fp --workload nbody --mt --duration-ms 200 --runs 2 --json)
+add_test(NAME runner_fp_scalar COMMAND cpu-bench-runner run fp --workload matmul --duration-ms 200 --runs 2)
+set_tests_properties(runner_fp_scalar PROPERTIES ENVIRONMENT "CPU_BENCH_FP_PATH=scalar")
+
 # SMBIOS 메모리 정보 해석 (직접 만든 표로 확인)
 add_executable(smbios_test smbios_test.cpp ${CMAKE_SOURCE_DIR}/runner/smbios.cpp)
 target_include_directories(smbios_test PRIVATE ${CMAKE_SOURCE_DIR}/runner)
