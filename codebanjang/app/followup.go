@@ -161,6 +161,7 @@ func (a *App) FollowUp(in FollowUpInput) error {
 			}
 		}
 		runtime.EventsEmit(a.ctx, "done", ev)
+		go a.autoRules(r.ID)
 	}()
 	return nil
 }

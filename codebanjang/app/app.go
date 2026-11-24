@@ -336,6 +336,7 @@ func (a *App) Start(in StartInput) (string, error) {
 			}
 		}
 		runtime.EventsEmit(a.ctx, "done", ev)
+		go a.autoRules(id) // learn from it if someone had to step in
 	}()
 	return id, nil
 }

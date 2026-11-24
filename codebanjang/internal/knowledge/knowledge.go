@@ -59,10 +59,15 @@ func Save(repo, text string) error {
 // section itself ("" if absent). The section runs from its heading to the
 // next level-2 heading or the end.
 func splitHuman(text string) (rest, human string) {
+	return splitSection(text, HumanHeading)
+}
+
+// splitSection takes the level-2 section starting with heading out of text.
+func splitSection(text, heading string) (rest, section string) {
 	lines := strings.Split(text, "\n")
 	start, end := -1, len(lines)
 	for i, l := range lines {
-		if start < 0 && strings.HasPrefix(l, HumanHeading) {
+		if start < 0 && strings.HasPrefix(l, heading) {
 			start = i
 			continue
 		}
@@ -74,9 +79,9 @@ func splitHuman(text string) (rest, human string) {
 	if start < 0 {
 		return text, ""
 	}
-	human = strings.TrimRight(strings.Join(lines[start:end], "\n"), "\n")
+	section = strings.TrimRight(strings.Join(lines[start:end], "\n"), "\n")
 	rest = strings.Join(append(append([]string{}, lines[:start]...), lines[end:]...), "\n")
-	return rest, human
+	return rest, section
 }
 
 // Merge builds the document from an AI draft: whatever the draft says in
@@ -84,11 +89,43 @@ func splitHuman(text string) (rest, human string) {
 // document (or an empty template) is put at the end.
 func Merge(draft, previous string) string {
 	body, _ := splitHuman(stripPreamble(strings.ReplaceAll(draft, "\r\n", "\n")))
+	body, _ = splitSection(body, RulesHeading)
 	_, human := splitHuman(previous)
+	_, rules := splitSection(previous, RulesHeading)
 	if human == "" {
 		human = strings.TrimRight(humanTemplate, "\n")
 	}
-	return strings.TrimRight(body, "\n") + "\n\n" + human + "\n"
+	out := strings.TrimRight(body, "\n") + "\n\n"
+	if rules != "" {
+		out += rules + "\n\n"
+	}
+	return out + human + "\n"
+}
+
+// RulesHeading starts the section of rules learned from past requests.
+// Like the human section, only approved entries go in, and an AI rewrite
+// of the document keeps it as it was.
+const RulesHeading = "## 작업 이력에서 배운 규칙"
+
+// AddRule appends an approved rule (with where it came from) to the
+// document's rules section, creating the section before the human one.
+func AddRule(doc, rule, source string) string {
+	doc = strings.ReplaceAll(doc, "\r\n", "\n")
+	item := "- " + strings.TrimSpace(rule)
+	if source != "" {
+		item += " (근거: " + source + ")"
+	}
+	rest, rules := splitSection(doc, RulesHeading)
+	if rules == "" {
+		rules = RulesHeading + " (사람이 승인한 것만)"
+	}
+	rules = strings.TrimRight(rules, "\n") + "\n" + item
+	rest, human := splitHuman(rest)
+	out := strings.TrimRight(rest, "\n") + "\n\n" + rules + "\n"
+	if human != "" {
+		out += "\n" + human + "\n"
+	}
+	return out
 }
 
 // stripPreamble drops what the AI says before the document's title

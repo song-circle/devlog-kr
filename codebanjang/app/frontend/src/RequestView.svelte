@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Approve, Detail, Discard, FollowUp, Stop } from '../wailsjs/go/main/App'
+  import { Approve, Detail, Discard, FollowUp, ProposeRules, Stop } from '../wailsjs/go/main/App'
   import type { main } from '../wailsjs/go/models'
 
   type Log = { id: string; t: number; role: string; line: string }
@@ -85,6 +85,22 @@
       busy = false
     }
   }
+  // Rules: what this request taught about the project (needs a follow-up or a fix round).
+  let rulesMsg = $state('')
+  let learnable = $derived((d?.tasks ?? []).some((t) => t.kind === 'followup' || t.kind === 'fix'))
+  async function findRules() {
+    rulesMsg = '찾는 중…'
+    busy = true
+    try {
+      const n = await ProposeRules(id)
+      rulesMsg = n ? `규칙 후보 ${n}개 — 폴더 설정 > 지식 문서에서 확인하세요` : '새로 배울 규칙이 없었습니다'
+    } catch (e) {
+      rulesMsg = String(e)
+    } finally {
+      busy = false
+    }
+  }
+
   const followTitle: Record<string, string> = {
     NO_CHANGE: 'AI가 물어봤습니다 — 답하면 이어서 합니다',
     DONE: '반영 전에 더 고치게 하기',
@@ -147,6 +163,9 @@
   <h2>{r.text}</h2>
   {#if r.reason && r.status !== 'NO_CHANGE'}<p class="reason" class:good={r.status === 'DEV'}>{r.status === 'DEV' ? '개발 반영됨: ' : ''}{r.reason}</p>{/if}
   {#if r.plan}<p class="plan"><b>PM 계획</b> {r.plan}</p>{/if}
+  {#if !readOnly && !isRunning && learnable}
+    <div class="frow rules"><button disabled={busy} onclick={findRules}>이 요청에서 규칙 찾기</button><span class="small">{rulesMsg || '사람이 끼어든 내용(추가 지시·검사 실패·리뷰 지적)에서 프로젝트 규칙 후보를 뽑습니다. 요청이 끝나면 한 번 자동으로 실행합니다.'}</span></div>
+  {/if}
   {#if !readOnly && !isRunning && followable.includes(r.status)}
     <div class="follow" class:ask={r.status === 'NO_CHANGE'}>
       <b>{followTitle[r.status]}</b>
@@ -252,6 +271,7 @@
   .num { width: 70px; }
   .small { color: var(--muted); font-size: 11px; }
   .answered { color: var(--accent); }
+  .rules { margin: 10px 0; }
   .plan b { color: var(--blue); margin-right: 6px; }
   .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 16px 0; }
   .stats div { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; }

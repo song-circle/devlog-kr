@@ -14,6 +14,8 @@ export function CloseWorkspace():Promise<void>;
 
 export function Current():Promise<store.Workspace>;
 
+export function DecideRule(arg1:number,arg2:boolean,arg3:string):Promise<void>;
+
 export function DeleteEmployee(arg1:number):Promise<void>;
 
 export function Detail(arg1:string):Promise<main.Detail>;
@@ -56,6 +58,8 @@ export function ProbeModel(arg1:string):Promise<ollama.ProbeResult>;
 
 export function Projects():Promise<Array<store.Project>>;
 
+export function ProposeRules(arg1:string):Promise<number>;
+
 export function RecentWorkspaces():Promise<Array<store.Workspace>>;
 
 export function Release(arg1:number):Promise<main.ReleaseResult>;
@@ -63,6 +67,8 @@ export function Release(arg1:number):Promise<main.ReleaseResult>;
 export function RemoveFolder(arg1:number):Promise<void>;
 
 export function RenameWorkspace(arg1:string):Promise<void>;
+
+export function RuleCandidates(arg1:number):Promise<Array<store.RuleCandidate>>;
 
 export function Running():Promise<Array<string>>;
 

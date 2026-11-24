@@ -33,6 +33,25 @@ func TestMergeDropsPreamble(t *testing.T) {
 	}
 }
 
+// Approved rules go into their own section before the human one, and an
+// AI rewrite keeps them.
+func TestRules(t *testing.T) {
+	doc := Merge("# 문서\n\n## 구조\n내용\n", "")
+	doc = AddRule(doc, "테스트의 구조체 리터럴은 필드 이름을 쓴다", "요청 20261124-113511-537")
+	doc = AddRule(doc, "금액은 정수 센트", "")
+	ri, hi := strings.Index(doc, RulesHeading), strings.Index(doc, HumanHeading)
+	if ri < 0 || hi < 0 || ri > hi {
+		t.Fatalf("sections out of order:\n%s", doc)
+	}
+	if !strings.Contains(doc, "- 테스트의 구조체 리터럴은 필드 이름을 쓴다 (근거: 요청 20261124-113511-537)\n- 금액은 정수 센트") {
+		t.Errorf("rules:\n%s", doc)
+	}
+	again := Merge("# 문서\n\n## 구조\n새 내용\n\n"+RulesHeading+"\n- AI가 지어낸 규칙\n", doc)
+	if !strings.Contains(again, "금액은 정수 센트") || strings.Contains(again, "AI가 지어낸") || !strings.Contains(again, "새 내용") {
+		t.Errorf("rewrite lost or changed rules:\n%s", again)
+	}
+}
+
 func TestMergeAddsTemplate(t *testing.T) {
 	got := Merge("# 문서\n\n## 구조\n내용\n", "")
 	if !strings.Contains(got, HumanHeading) || !strings.Contains(got, "건드리면 안 되는 곳") {

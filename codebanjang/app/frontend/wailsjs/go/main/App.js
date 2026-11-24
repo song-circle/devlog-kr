@@ -22,6 +22,10 @@ export function Current() {
   return window['go']['main']['App']['Current']();
 }
 
+export function DecideRule(arg1, arg2, arg3) {
+  return window['go']['main']['App']['DecideRule'](arg1, arg2, arg3);
+}
+
 export function DeleteEmployee(arg1) {
   return window['go']['main']['App']['DeleteEmployee'](arg1);
 }
@@ -106,6 +110,10 @@ export function Projects() {
   return window['go']['main']['App']['Projects']();
 }
 
+export function ProposeRules(arg1) {
+  return window['go']['main']['App']['ProposeRules'](arg1);
+}
+
 export function RecentWorkspaces() {
   return window['go']['main']['App']['RecentWorkspaces']();
 }
@@ -120,6 +128,10 @@ export function RemoveFolder(arg1) {
 
 export function RenameWorkspace(arg1) {
   return window['go']['main']['App']['RenameWorkspace'](arg1);
+}
+
+export function RuleCandidates(arg1) {
+  return window['go']['main']['App']['RuleCandidates'](arg1);
 }
 
 export function Running() {

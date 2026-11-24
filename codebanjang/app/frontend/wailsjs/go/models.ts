@@ -579,6 +579,30 @@ export namespace store {
 	        this.project = source["project"];
 	    }
 	}
+	export class RuleCandidate {
+	    id: number;
+	    projectId: number;
+	    requestId: string;
+	    rule: string;
+	    why: string;
+	    status: string;
+	    createdAt: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new RuleCandidate(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.projectId = source["projectId"];
+	        this.requestId = source["requestId"];
+	        this.rule = source["rule"];
+	        this.why = source["why"];
+	        this.status = source["status"];
+	        this.createdAt = source["createdAt"];
+	    }
+	}
 	export class TaskRow {
 	    id: number;
 	    seq: number;

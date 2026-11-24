@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,6 +21,7 @@ type fakeEngine struct {
 	calls   []engine.Spec
 	dev     []func(dir string) // one per developer call, in order
 	reviews []review           // one per review call; approve when exhausted
+	rules   []ProposedRule     // answer to a rule proposal
 	devN    int
 	revN    int
 }
@@ -37,6 +39,9 @@ func (f *fakeEngine) Run(ctx context.Context, s engine.Spec, on func(engine.Even
 		}
 		f.revN++
 		res.Structured, _ = json.Marshal(rv)
+		return res, nil
+	case strings.Contains(s.JSONSchema, `"rules"`): // rule proposals
+		res.Structured, _ = json.Marshal(map[string]any{"rules": f.rules})
 		return res, nil
 	case s.JSONSchema != "": // PM
 		res.Structured, _ = json.Marshal(plan{Summary: "두 단계", Tasks: []planTask{
@@ -455,5 +460,39 @@ func TestFollowUp(t *testing.T) {
 	}
 	if strings.Join(kinds, ",") != "work,followup,followup" {
 		t.Errorf("tasks %v", kinds)
+	}
+}
+
+// After a request where the person had to step in, an employee proposes
+// rules; they become pending candidates of the project. A request that
+// went through untouched has nothing to learn and costs no run.
+func TestProposeRules(t *testing.T) {
+	repo := newRepo(t)
+	data := t.TempDir()
+	st, _ := store.Open(filepath.Join(data, "aio.db"))
+	defer st.Close()
+	fe := &fakeEngine{t: t, dev: []func(string){func(string) {}, func(d string) { write(t, d, "a.txt", "a\n") }},
+		rules: []ProposedRule{{Rule: "테스트의 구조체 리터럴은 필드 이름을 쓴다", Why: "사람이 테스트를 그렇게 바꾸라고 했다"}, {Rule: " ", Why: "빈 규칙은 버린다"}}}
+	o := &Orchestrator{Engine: fe, Store: st, DataDir: data}
+	cfg := Config{Repo: repo, Request: "필드 추가", Mode: ModeSolo, BudgetUSD: 5, ProjectID: 7}
+	out, _ := o.Run(context.Background(), cfg)
+	r, _ := st.GetRequest(out.RequestID)
+	if _, err := o.ProposeRules(context.Background(), r, "", Agent{}); !errors.Is(err, ErrNothingToLearn) {
+		t.Fatalf("untouched request: %v", err)
+	}
+	calls := len(fe.calls)
+	o.FollowUp(context.Background(), cfg, out.RequestID, out.Worktree, "테스트도 필드 이름 있는 형태로 바꿔")
+	r, _ = st.GetRequest(out.RequestID)
+	got, err := o.ProposeRules(context.Background(), r, "", Agent{})
+	if err != nil || len(got) != 1 {
+		t.Fatalf("%v %v", got, err)
+	}
+	p := fe.calls[len(fe.calls)-1]
+	if len(fe.calls) != calls+2 || !strings.Contains(p.Prompt, "테스트도 필드 이름 있는 형태로") || p.Model != "haiku" {
+		t.Errorf("rules prompt/model: %s %q", p.Model, p.Prompt)
+	}
+	cs, _ := st.RuleCandidates(7, store.RulePending)
+	if len(cs) != 1 || cs[0].RequestID != out.RequestID {
+		t.Errorf("candidates %+v", cs)
 	}
 }
