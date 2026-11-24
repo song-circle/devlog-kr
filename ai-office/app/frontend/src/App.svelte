@@ -8,6 +8,7 @@
   import Employees from './Employees.svelte'
   import Projects from './Projects.svelte'
   import Welcome from './Welcome.svelte'
+  import Overview from './Overview.svelte'
 
   type Log = { id: string; t: number; role: string; line: string }
 
@@ -102,6 +103,7 @@
       {#each ws.projects as p (p.id)}<div class="folder" title={p.repo}>📁 {p.name}</div>{/each}
     </div>
     <button class="primary new" onclick={() => (selected = null)}>+ 새 요청</button>
+    <button class="nav overview" class:active={selected === 'overview'} onclick={() => (selected = 'overview')}>작업 현황</button>
     <div class="navs">
       <button class="nav" class:active={selected === 'projects'} onclick={() => (selected = 'projects')}>폴더 설정</button>
       <button class="nav" class:active={selected === 'employees'} onclick={() => (selected = 'employees')}>직원</button>
@@ -129,6 +131,8 @@
       <NewRequest onstarted={started} onemployees={() => (selected = 'employees')} onprojects={() => (selected = 'projects')} />
     {:else if selected === 'employees'}
       <Employees />
+    {:else if selected === 'overview'}
+      <Overview {tick} onopen={(id) => (selected = id)} />
     {:else if selected === 'projects'}
       <Projects onchanged={refresh} onstarted={started} {draft} ondraftdone={() => (draft = null)} />
     {:else}
@@ -154,6 +158,7 @@
   .new { margin: 0 12px 8px; }
   .navs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 0 12px 12px; }
   .nav { background: transparent; }
+  .overview { margin: 0 12px 6px; }
   .nav.active { border-color: var(--accent); }
   .list { overflow-y: auto; flex: 1; padding: 0 8px 12px; }
   .item { display: block; width: 100%; text-align: left; background: transparent; border: 1px solid transparent; margin-bottom: 4px; padding: 9px 10px; }

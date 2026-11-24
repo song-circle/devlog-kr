@@ -27,6 +27,42 @@ export namespace claudecode {
 
 export namespace main {
 	
+	export class Column {
+	    key: string;
+	    title: string;
+	    hint: string;
+	    items: store.RequestRow[];
+	
+	    static createFrom(source: any = {}) {
+	        return new Column(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.key = source["key"];
+	        this.title = source["title"];
+	        this.hint = source["hint"];
+	        this.items = this.convertValues(source["items"], store.RequestRow);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class Detail {
 	    request: store.RequestRow;
 	    tasks: store.TaskRow[];
@@ -142,6 +178,62 @@ export namespace main {
 	        this.chars = source["chars"];
 	        this.capped = source["capped"];
 	    }
+	}
+	export class Overview {
+	    projectId: number;
+	    remote: boolean;
+	    dev: string;
+	    prod: string;
+	    fetchErr: string;
+	    prodTime: string;
+	    devAhead: number;
+	    localBranch: string;
+	    localDirty: number;
+	    localBehind: number;
+	    localAhead: number;
+	    columns: Column[];
+	    commits: workspace.Commit[];
+	    commitRequest: Record<string, string>;
+	
+	    static createFrom(source: any = {}) {
+	        return new Overview(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.projectId = source["projectId"];
+	        this.remote = source["remote"];
+	        this.dev = source["dev"];
+	        this.prod = source["prod"];
+	        this.fetchErr = source["fetchErr"];
+	        this.prodTime = source["prodTime"];
+	        this.devAhead = source["devAhead"];
+	        this.localBranch = source["localBranch"];
+	        this.localDirty = source["localDirty"];
+	        this.localBehind = source["localBehind"];
+	        this.localAhead = source["localAhead"];
+	        this.columns = this.convertValues(source["columns"], Column);
+	        this.commits = this.convertValues(source["commits"], workspace.Commit);
+	        this.commitRequest = source["commitRequest"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class ReleaseResult {
 	    url: string;
@@ -502,6 +594,33 @@ export namespace store {
 		    }
 		    return a;
 		}
+	}
+
+}
+
+export namespace workspace {
+	
+	export class Commit {
+	    hash: string;
+	    parents: string[];
+	    subject: string;
+	    author: string;
+	    date: string;
+	    refs: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new Commit(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.hash = source["hash"];
+	        this.parents = source["parents"];
+	        this.subject = source["subject"];
+	        this.author = source["author"];
+	        this.date = source["date"];
+	        this.refs = source["refs"];
+	    }
 	}
 
 }

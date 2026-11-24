@@ -90,6 +90,10 @@ export function OpenWorkspace(arg1) {
   return window['go']['main']['App']['OpenWorkspace'](arg1);
 }
 
+export function Overview(arg1, arg2) {
+  return window['go']['main']['App']['Overview'](arg1, arg2);
+}
+
 export function ProbeModel(arg1) {
   return window['go']['main']['App']['ProbeModel'](arg1);
 }

@@ -48,6 +48,8 @@ export function OpenFolder():Promise<boolean>;
 
 export function OpenWorkspace(arg1:number):Promise<void>;
 
+export function Overview(arg1:number,arg2:boolean):Promise<main.Overview>;
+
 export function ProbeModel(arg1:string):Promise<ollama.ProbeResult>;
 
 export function Projects():Promise<Array<store.Project>>;
