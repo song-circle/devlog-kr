@@ -53,6 +53,12 @@ type Config struct {
 	// added to every employee's instructions; in learn mode it is the
 	// document being updated instead.
 	Knowledge string `json:"-"`
+	// Preparing the work folder of code-changing modes before anyone works
+	// in it: files git ignores that the project needs are copied from the
+	// project folder, then the setup commands run (SetupTimeout each).
+	CopyFiles    []string      `json:"copy_files,omitempty"`
+	Setup        []string      `json:"setup,omitempty"`
+	SetupTimeout time.Duration `json:"setup_timeout,omitempty"`
 	// Panels hold meetings instead of single employees: "review" (QA review
 	// stage and the audit mode) is a cross-review when it has 2+ members.
 	// "plan" (planning in plan and team modes) is a draft-critique meeting
@@ -237,6 +243,9 @@ func (o *Orchestrator) log(role, line string) {
 
 // execute returns the final request status and reason.
 func (r *run) execute(ctx context.Context) (string, string) {
+	if err := r.prepare(ctx); err != nil {
+		return store.ReqFailed, "작업 폴더 준비: " + err.Error()
+	}
 	p, err := r.plan(ctx)
 	if err != nil {
 		return store.ReqFailed, "plan: " + err.Error()
@@ -492,6 +501,88 @@ func (r *run) verify(ctx context.Context, round int) (string, error) {
 		r.o.log("qa", fmt.Sprintf("check %s (%.1fs): %s", state, res.Duration.Seconds(), cmd))
 	}
 	return strings.Join(fails, "\n\n"), nil
+}
+
+// prepare readies the work folder before anyone works in it. A new
+// worktree has only what git tracks, so builds and checks that need
+// ignored files (.env, installed packages) would fail there. A setup that
+// changes files git sees fails the request: those changes would be mixed
+// into the AI's work and its commit.
+func (r *run) prepare(ctx context.Context) error {
+	if len(r.cfg.CopyFiles) == 0 && len(r.cfg.Setup) == 0 {
+		return nil
+	}
+	st := r.o.Store
+	plan := []string{}
+	if len(r.cfg.CopyFiles) > 0 {
+		plan = append(plan, "복사: "+strings.Join(r.cfg.CopyFiles, ", "))
+	}
+	for _, c := range r.cfg.Setup {
+		plan = append(plan, "실행: "+c)
+	}
+	taskID, err := st.AddTask(r.id, 0, "setup", "system", "작업 폴더 준비", strings.Join(plan, "\n"))
+	if err != nil {
+		return err
+	}
+	st.SetTaskStatus(taskID, store.InProgress, "")
+	var report []string
+	fail := func(msg string) error {
+		report = append(report, msg)
+		st.SetTaskResult(taskID, 1, strings.Join(report, "\n"))
+		st.SetTaskStatus(taskID, store.Failed, oneLine(msg, 200))
+		r.o.log("system", "setup failed: "+oneLine(msg, 200))
+		return errors.New(msg)
+	}
+
+	copied, missing, err := workspace.CopyIgnored(r.wt.Repo, r.wt.Dir, r.cfg.CopyFiles)
+	if err != nil {
+		return fail(err.Error())
+	}
+	if len(copied) > 0 {
+		report = append(report, "복사함: "+strings.Join(copied, ", "))
+		r.o.log("system", "copied into work folder: "+strings.Join(copied, ", "))
+	}
+	if len(missing) > 0 {
+		report = append(report, "프로젝트 폴더에 없어서 건너뜀: "+strings.Join(missing, ", "))
+		r.o.log("system", "not in project folder, skipped: "+strings.Join(missing, ", "))
+	}
+
+	timeout := r.cfg.SetupTimeout
+	if timeout <= 0 {
+		timeout = 10 * time.Minute
+	}
+	for i, cmd := range r.cfg.Setup {
+		logPath := filepath.Join(r.dir, fmt.Sprintf("setup-%d.txt", i+1))
+		res := check.Run(ctx, r.wt.Dir, cmd, timeout, logPath)
+		if ctx.Err() != nil {
+			return fail("중지됨")
+		}
+		if !res.Passed() {
+			why := fmt.Sprintf("exit %d", res.ExitCode)
+			if res.TimedOut {
+				why = fmt.Sprintf("시간 초과 %s", timeout)
+			}
+			return fail(fmt.Sprintf("준비 명령 `%s` 실패(%s):\n%s", cmd, why, check.Tail(res.Output, 2000)))
+		}
+		report = append(report, fmt.Sprintf("실행함(%.1f초): %s", res.Duration.Seconds(), cmd))
+		r.o.log("system", fmt.Sprintf("setup PASS (%.1fs): %s", res.Duration.Seconds(), cmd))
+	}
+
+	changes, err := workspace.Status(r.wt.Dir)
+	if err != nil {
+		return fail(err.Error())
+	}
+	if len(changes) > 0 {
+		var paths []string
+		for _, c := range changes {
+			paths = append(paths, c.Path)
+		}
+		return fail("준비 명령이 git에 잡히는 파일을 만들거나 바꿨습니다: " + strings.Join(paths, ", ") +
+			". AI의 변경 내용에 섞이므로 .gitignore에 넣거나 명령을 고치세요")
+	}
+	st.SetTaskResult(taskID, 1, strings.Join(report, "\n"))
+	st.SetTaskStatus(taskID, store.Completed, "")
+	return nil
 }
 
 // answer runs a read-only mode: one employee reads the project and writes

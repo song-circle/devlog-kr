@@ -65,7 +65,7 @@
   }
 
   const roleColor: Record<string, string> = { pm: 'var(--blue)', dev: 'var(--accent)', qa: 'var(--green)', ask: 'var(--blue)', system: 'var(--muted)' }
-  const kindName: Record<string, string> = { plan: '계획', work: '작업', fix: '수정', review: 'QA 리뷰', answer: '답변' }
+  const kindName: Record<string, string> = { plan: '계획', work: '작업', fix: '수정', review: 'QA 리뷰', answer: '답변', setup: '준비' }
   const kindLabel: Record<string, string> = {
     finding: '검토', verdict: '교차 확인', conclusion: '결론', draft: '초안', critique: '비판', revision: '수정본',
     opinion: '입장', rebuttal: '반박',

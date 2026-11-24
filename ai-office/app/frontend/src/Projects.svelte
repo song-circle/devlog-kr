@@ -43,7 +43,10 @@
   function edit(p: store.Project) {
     error = ''
     knowledgeOf = null
-    editing = { ...p, checksText: (p.checks ?? []).join('\n'), protectText: (p.protect ?? []).join(', ') }
+    editing = {
+      ...p, checksText: (p.checks ?? []).join('\n'), protectText: (p.protect ?? []).join(', '),
+      copyText: (p.copyFiles ?? []).join('\n'), setupText: (p.setup ?? []).join('\n'),
+    }
   }
 
   async function add() {
@@ -64,6 +67,7 @@
       await SaveProject({
         id: editing.id, name: editing.name, repo: editing.repo, notes: editing.notes,
         checks: editing.checksText.split('\n'), protect: editing.protectText.split(','),
+        copyFiles: editing.copyText.split('\n'), setup: editing.setupText.split('\n'),
       } as any)
       editing = null
       await load()
@@ -123,6 +127,22 @@
         <input id="pp" bind:value={editing.protectText} placeholder="*_test.go" />
       </div>
     </div>
+    <div class="prep">
+      <b>작업 폴더 준비</b>
+      <span class="muted">AI는 요청마다 git에 있는 파일만 든 별도 폴더에서 일합니다. 빌드·검사에 필요한데 git에 없는 파일은 여기서 채웁니다. 코드 수정 요청에서만, AI가 일을 시작하기 전에 실행합니다.</span>
+    </div>
+    <div class="grid2">
+      <div>
+        <label for="pf">복사할 파일·폴더 (한 줄에 하나, 프로젝트 폴더 기준, * 사용 가능)</label>
+        <textarea id="pf" rows="3" bind:value={editing.copyText} placeholder={'.env\nconfig/local.json'}></textarea>
+        <span class="small muted">git이 무시하는(.gitignore에 있는) 파일만 복사합니다. 복사한 파일은 AI도 읽을 수 있습니다.</span>
+      </div>
+      <div>
+        <label for="ps">준비 명령 (한 줄에 하나, 차례로 실행, 각 15분 제한)</label>
+        <textarea id="ps" rows="3" bind:value={editing.setupText} placeholder={'npm ci\ngo mod download'}></textarea>
+        <span class="small muted">실패하거나 git에 잡히는 파일을 바꾸면 요청을 멈춥니다(AI 변경에 섞이지 않게).</span>
+      </div>
+    </div>
     <label for="no">프로젝트 설명 (모든 직원에게 전달)</label>
     <textarea id="no" rows="5" bind:value={editing.notes} placeholder={'예:\n- Go 1.22, 표준 라이브러리만 사용\n- 금액은 정수 센트로 다룬다\n- 사용자 화면 문구는 한국어'}></textarea>
     <div class="actions">
@@ -146,6 +166,7 @@
       <div class="meta">
         <span>검사: {p.checks?.length ? p.checks.join(' · ') : '없음'}</span>
         <span>보호: {p.protect?.length ? p.protect.join(', ') : '없음'}</span>
+        <span>준비: {[...(p.copyFiles ?? []).map((f) => '복사 ' + f), ...(p.setup ?? [])].join(' · ') || '없음'}</span>
       </div>
       {#if p.notes}<pre class="notes">{p.notes}</pre>{/if}
     </div>
@@ -170,6 +191,8 @@
   .meta { display: flex; gap: 24px; color: var(--muted); font-size: 12px; margin-top: 8px; }
   .notes { margin-top: 10px; color: var(--text); background: var(--panel2); border-radius: 6px; padding: 8px 10px; }
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .prep { margin-top: 18px; display: flex; flex-direction: column; gap: 4px; }
+  .prep .muted, .small { font-size: 12px; line-height: 1.5; }
   .actions { margin-top: 14px; display: flex; gap: 8px; }
   .err { color: var(--red); }
 </style>

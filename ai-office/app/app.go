@@ -294,6 +294,7 @@ func (a *App) Start(in StartInput) (string, error) {
 		ID: id, Repo: top, Request: in.Request, Checks: proj.Checks, Protect: append(proj.Protect, knowledge.RelPath), // the document changes only through review
 		PMModel: "sonnet", DevModel: "sonnet", Agents: agents, MaxFixRounds: in.FixRounds, BudgetUSD: in.BudgetUSD,
 		TaskTimeout: 15 * time.Minute, CheckTimeout: 5 * time.Minute,
+		CopyFiles: proj.CopyFiles, Setup: proj.Setup, SetupTimeout: 15 * time.Minute,
 		Mode: in.Mode, ProjectID: proj.ID, ProjectNotes: proj.Notes, Knowledge: doc, Panels: panels, MeetingRounds: in.Rounds,
 	}
 	// Create the worktree and the database row now, so the request exists

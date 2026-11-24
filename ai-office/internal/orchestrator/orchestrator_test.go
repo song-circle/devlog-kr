@@ -308,3 +308,78 @@ func TestLearnDraftsKnowledge(t *testing.T) {
 		t.Errorf("learn wrote the document into the project")
 	}
 }
+
+// newRepoIgnoring is newRepo with a committed .gitignore and an ignored
+// .env in the project folder (like a real project's local settings).
+func newRepoIgnoring(t *testing.T) string {
+	t.Helper()
+	dir := newRepo(t)
+	write(t, dir, ".gitignore", ".env\nbuild/\n")
+	for _, args := range [][]string{{"add", "-A"}, {"-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "ignore"}} {
+		if out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
+	}
+	write(t, dir, ".env", "SECRET=1\n")
+	return dir
+}
+
+// The work folder gets the ignored files and the setup output before the
+// developer starts; the check can use them; none of it is committed.
+func TestPrepareWorkFolder(t *testing.T) {
+	repo := newRepoIgnoring(t)
+	data := t.TempDir()
+	st, _ := store.Open(filepath.Join(data, "aio.db"))
+	defer st.Close()
+	var sawEnv, sawBuild bool
+	fe := &fakeEngine{t: t, dev: []func(string){func(d string) {
+		_, e1 := os.Stat(filepath.Join(d, ".env"))
+		_, e2 := os.Stat(filepath.Join(d, "build", "gen.txt"))
+		sawEnv, sawBuild = e1 == nil, e2 == nil
+		write(t, d, "a.txt", "a\n")
+	}}}
+	o := &Orchestrator{Engine: fe, Store: st, DataDir: data}
+	out, err := o.Run(context.Background(), Config{Repo: repo, Request: "a", Mode: ModeSolo, BudgetUSD: 1,
+		CopyFiles: []string{".env", ".env.local"},
+		Setup:     []string{`mkdir build && echo gen> build\gen.txt`},
+		Checks:    []string{`findstr SECRET .env && findstr gen build\gen.txt`}})
+	if err != nil || out.Status != store.ReqDone {
+		t.Fatalf("%v %+v", err, out)
+	}
+	if !sawEnv || !sawBuild {
+		t.Errorf("developer saw .env %v, build output %v", sawEnv, sawBuild)
+	}
+	files, _ := exec.Command("git", "-C", out.Worktree.Dir, "show", "--name-only", "--format=", "HEAD").Output()
+	if got := strings.Fields(string(files)); strings.Join(got, ",") != "a.txt" {
+		t.Errorf("committed files = %v", got)
+	}
+	tasks, _ := st.Tasks(out.RequestID)
+	if tasks[0].Kind != "setup" || tasks[0].Status != store.Completed || !strings.Contains(tasks[0].Result, ".env.local") {
+		t.Errorf("setup task %+v", tasks[0])
+	}
+}
+
+// A setup that fails, or that changes files git sees, stops the request
+// before any employee runs.
+func TestPrepareFailures(t *testing.T) {
+	for name, setup := range map[string]string{
+		"fails":         `exit 3`,
+		"dirties files": `echo x> generated.txt`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			repo := newRepoIgnoring(t)
+			data := t.TempDir()
+			st, _ := store.Open(filepath.Join(data, "aio.db"))
+			defer st.Close()
+			fe := &fakeEngine{t: t}
+			o := &Orchestrator{Engine: fe, Store: st, DataDir: data}
+			out, err := o.Run(context.Background(), Config{Repo: repo, Request: "a", Mode: ModeSolo, BudgetUSD: 1, Setup: []string{setup}})
+			if err != nil || out.Status != store.ReqFailed || !strings.Contains(out.Reason, "작업 폴더 준비") {
+				t.Fatalf("%v %+v", err, out)
+			}
+			if len(fe.calls) != 0 {
+				t.Errorf("engine ran %d times", len(fe.calls))
+			}
+		})
+	}
+}

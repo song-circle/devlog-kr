@@ -10,12 +10,17 @@ import (
 // Project is a registered repository: where the team works, how its work
 // is checked, and background every employee should know.
 type Project struct {
-	ID        int64    `json:"id"`
-	Name      string   `json:"name"`
-	Repo      string   `json:"repo"`
-	Checks    []string `json:"checks"`
-	Protect   []string `json:"protect"`
-	Notes     string   `json:"notes"` // stack, rules, background; added to every prompt
+	ID      int64    `json:"id"`
+	Name    string   `json:"name"`
+	Repo    string   `json:"repo"`
+	Checks  []string `json:"checks"`
+	Protect []string `json:"protect"`
+	Notes   string   `json:"notes"` // stack, rules, background; added to every prompt
+	// Preparing a request's work folder (code-changing modes): files git
+	// ignores that the project needs (.env, local config) are copied from
+	// the project folder, then Setup commands run (npm ci, code generation).
+	CopyFiles []string `json:"copyFiles"`
+	Setup     []string `json:"setup"`
 	CreatedAt string   `json:"createdAt"`
 }
 
@@ -55,16 +60,18 @@ func (s *Store) SaveProject(p Project) (int64, error) {
 	}
 	checks, _ := json.Marshal(cleanList(p.Checks))
 	protect, _ := json.Marshal(cleanList(p.Protect))
+	copies, _ := json.Marshal(cleanList(p.CopyFiles))
+	setup, _ := json.Marshal(cleanList(p.Setup))
 	if p.ID == 0 {
-		res, err := s.db.Exec(`INSERT INTO projects(name, repo, checks_json, protect_json, notes, created_at) VALUES (?,?,?,?,?,?)`,
-			p.Name, p.Repo, string(checks), string(protect), p.Notes, now())
+		res, err := s.db.Exec(`INSERT INTO projects(name, repo, checks_json, protect_json, notes, created_at, copy_json, setup_json) VALUES (?,?,?,?,?,?,?,?)`,
+			p.Name, p.Repo, string(checks), string(protect), p.Notes, now(), string(copies), string(setup))
 		if err != nil {
 			return 0, err
 		}
 		return res.LastInsertId()
 	}
-	_, err := s.db.Exec(`UPDATE projects SET name=?, repo=?, checks_json=?, protect_json=?, notes=? WHERE id=? AND deleted=0`,
-		p.Name, p.Repo, string(checks), string(protect), p.Notes, p.ID)
+	_, err := s.db.Exec(`UPDATE projects SET name=?, repo=?, checks_json=?, protect_json=?, notes=?, copy_json=?, setup_json=? WHERE id=? AND deleted=0`,
+		p.Name, p.Repo, string(checks), string(protect), p.Notes, string(copies), string(setup), p.ID)
 	return p.ID, err
 }
 
@@ -75,12 +82,20 @@ func (s *Store) DeleteProject(id int64) error {
 
 func scanProject(sc interface{ Scan(...any) error }) (Project, error) {
 	var p Project
-	var checks, protect string
-	if err := sc.Scan(&p.ID, &p.Name, &p.Repo, &checks, &protect, &p.Notes, &p.CreatedAt); err != nil {
+	var checks, protect, copies, setup string
+	if err := sc.Scan(&p.ID, &p.Name, &p.Repo, &checks, &protect, &p.Notes, &p.CreatedAt, &copies, &setup); err != nil {
 		return p, err
 	}
 	json.Unmarshal([]byte(checks), &p.Checks)
 	json.Unmarshal([]byte(protect), &p.Protect)
+	json.Unmarshal([]byte(copies), &p.CopyFiles)
+	json.Unmarshal([]byte(setup), &p.Setup)
+	if p.CopyFiles == nil {
+		p.CopyFiles = []string{}
+	}
+	if p.Setup == nil {
+		p.Setup = []string{}
+	}
 	if p.Checks == nil {
 		p.Checks = []string{}
 	}
@@ -91,7 +106,7 @@ func scanProject(sc interface{ Scan(...any) error }) (Project, error) {
 }
 
 func (s *Store) Projects() ([]Project, error) {
-	rows, err := s.db.Query(`SELECT id, name, repo, checks_json, protect_json, notes, created_at FROM projects WHERE deleted=0 ORDER BY name, id`)
+	rows, err := s.db.Query(`SELECT id, name, repo, checks_json, protect_json, notes, created_at, copy_json, setup_json FROM projects WHERE deleted=0 ORDER BY name, id`)
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +123,7 @@ func (s *Store) Projects() ([]Project, error) {
 }
 
 func (s *Store) Project(id int64) (Project, error) {
-	p, err := scanProject(s.db.QueryRow(`SELECT id, name, repo, checks_json, protect_json, notes, created_at FROM projects WHERE id=? AND deleted=0`, id))
+	p, err := scanProject(s.db.QueryRow(`SELECT id, name, repo, checks_json, protect_json, notes, created_at, copy_json, setup_json FROM projects WHERE id=? AND deleted=0`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return p, errors.New("없는 프로젝트입니다")
 	}

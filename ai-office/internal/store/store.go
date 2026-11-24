@@ -170,6 +170,8 @@ func Open(path string) (*Store, error) {
 		// The process running the request (proc.SelfToken), so another
 		// window or a command-line run does not mark it interrupted.
 		`ALTER TABLE requests ADD COLUMN owner TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE projects ADD COLUMN copy_json TEXT NOT NULL DEFAULT '[]'`,
+		`ALTER TABLE projects ADD COLUMN setup_json TEXT NOT NULL DEFAULT '[]'`,
 	} {
 		if _, err := db.Exec(m); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			db.Close()

@@ -348,6 +348,8 @@ export namespace store {
 	    checks: string[];
 	    protect: string[];
 	    notes: string;
+	    copyFiles: string[];
+	    setup: string[];
 	    createdAt: string;
 	
 	    static createFrom(source: any = {}) {
@@ -362,6 +364,8 @@ export namespace store {
 	        this.checks = source["checks"];
 	        this.protect = source["protect"];
 	        this.notes = source["notes"];
+	        this.copyFiles = source["copyFiles"];
+	        this.setup = source["setup"];
 	        this.createdAt = source["createdAt"];
 	    }
 	}
