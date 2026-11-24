@@ -102,6 +102,10 @@ export function RecentWorkspaces() {
   return window['go']['main']['App']['RecentWorkspaces']();
 }
 
+export function Release(arg1) {
+  return window['go']['main']['App']['Release'](arg1);
+}
+
 export function RemoveFolder(arg1) {
   return window['go']['main']['App']['RemoveFolder'](arg1);
 }

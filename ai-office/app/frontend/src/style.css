@@ -68,5 +68,6 @@ pre {
 .s-RUNNING { color: var(--blue); }
 .s-DONE { color: var(--green); }
 .s-APPROVED { color: var(--accent); }
+.s-DEV { color: var(--accent); }
 .s-FAILED, .s-INTERRUPTED { color: var(--red); }
 .s-CANCELLED, .s-DISCARDED { color: var(--muted); }

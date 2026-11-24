@@ -11,6 +11,7 @@ import (
 const (
 	ReqApproved  = "APPROVED"  // merged into the user's branch
 	ReqDiscarded = "DISCARDED" // worktree and branch removed
+	ReqDev       = "DEV"       // pushed to the shared development branch
 )
 
 // RequestRow is a request with its totals, for lists.
@@ -98,6 +99,20 @@ func (s *Store) ListRequestsIn(repos []string, limit int) ([]RequestRow, error) 
 func (s *Store) GetRequest(id string) (RequestRow, error) {
 	return scanRequest(s.db.QueryRow(`SELECT `+requestCols+` FROM requests r LEFT JOIN runs u ON u.request_id = r.id
 		WHERE r.id = ? GROUP BY r.id`, id))
+}
+
+// SetDeployed records a request pushed to the development branch: its own
+// work commit (before the latest branch was merged in) shows its changes.
+func (s *Store) SetDeployed(id, reason, workCommit string) error {
+	_, err := s.db.Exec(`UPDATE requests SET status=?, reason=?, work_commit=? WHERE id=?`, ReqDev, reason, workCommit, id)
+	return err
+}
+
+// WorkCommit is the commit a deployed request made ("" if not deployed).
+func (s *Store) WorkCommit(id string) string {
+	var c string
+	s.db.QueryRow(`SELECT work_commit FROM requests WHERE id=?`, id).Scan(&c)
+	return c
 }
 
 // SetRequestStatus records the user's decision on a finished request.

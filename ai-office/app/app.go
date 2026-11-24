@@ -274,6 +274,15 @@ func (a *App) Start(in StartInput) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("지식 문서를 읽지 못했습니다: %w", err)
 	}
+	// Code changes start from the latest shared development branch, where
+	// they will be deployed, not from whatever this PC has checked out.
+	baseRef := ""
+	if _, target := a.deployTarget(proj.ID); target != "" && !orchestrator.ReadOnly(in.Mode) {
+		if err := workspace.Fetch(top, remote, proj.DevBranch); err != nil {
+			return "", fmt.Errorf("GitHub에서 %s 를 가져오지 못했습니다: %w", target, err)
+		}
+		baseRef = target
+	}
 
 	id := orchestrator.NewID()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -294,7 +303,7 @@ func (a *App) Start(in StartInput) (string, error) {
 		ID: id, Repo: top, Request: in.Request, Checks: proj.Checks, Protect: append(proj.Protect, knowledge.RelPath), // the document changes only through review
 		PMModel: "sonnet", DevModel: "sonnet", Agents: agents, MaxFixRounds: in.FixRounds, BudgetUSD: in.BudgetUSD,
 		TaskTimeout: 15 * time.Minute, CheckTimeout: 5 * time.Minute,
-		CopyFiles: proj.CopyFiles, Setup: proj.Setup, SetupTimeout: 15 * time.Minute,
+		BaseRef: baseRef, CopyFiles: proj.CopyFiles, Setup: proj.Setup, SetupTimeout: 15 * time.Minute,
 		Mode: in.Mode, ProjectID: proj.ID, ProjectNotes: proj.Notes, Knowledge: doc, Panels: panels, MeetingRounds: in.Rounds,
 	}
 	// Create the worktree and the database row now, so the request exists
@@ -375,6 +384,9 @@ type Detail struct {
 	Diff     string           `json:"diff"`
 	Answer   string           `json:"answer"`   // read-only modes: the answer / plan / review
 	Messages []store.Message  `json:"messages"` // meeting statements
+	// DeployTarget is where approving puts the change: "origin/dev" for a
+	// project with a development branch, "" for the local folder.
+	DeployTarget string `json:"deployTarget"`
 }
 
 // LastProjectID is the project used last time (0 if none).
@@ -402,6 +414,7 @@ func (a *App) Detail(id string) (*Detail, error) {
 		return nil, err
 	}
 	d := &Detail{Request: r}
+	_, d.DeployTarget = a.deployTarget(r.ProjectID)
 	if d.Messages, err = a.st.Messages(id); err != nil {
 		return nil, err
 	}
@@ -425,6 +438,12 @@ func (a *App) Detail(id string) (*Detail, error) {
 	case store.ReqDone, store.ReqApproved:
 		d.Diff, _ = workspace.DiffBranch(r.Repo, r.Base, r.Branch)
 		diffStat, _ = workspace.Open(r.Repo, r.Worktree, r.Branch, r.Base).DiffStat()
+	case store.ReqDev:
+		// The branch now also holds others' changes merged in before the
+		// push; the request's own change is its work commit.
+		if work := a.st.WorkCommit(id); work != "" {
+			d.Diff, _ = workspace.DiffBranch(r.Repo, r.Base, work)
+		}
 	case store.ReqRunning, store.ReqFailed, store.ReqCancelled, store.ReqInterrupted:
 		if _, err := os.Stat(r.Worktree); err == nil {
 			d.Diff, _ = workspace.Open(r.Repo, r.Worktree, r.Branch, r.Base).Diff()
@@ -453,6 +472,9 @@ func (a *App) Approve(id string) error {
 	if r.Status != store.ReqDone {
 		return fmt.Errorf("검증을 통과한 요청만 반영할 수 있습니다 (현재 %s)", r.Status)
 	}
+	if p, target := a.deployTarget(r.ProjectID); target != "" {
+		return a.deployDev(r, p)
+	}
 	if err := workspace.MergeInto(r.Repo, r.Branch, "AI Office 요청 반영: "+oneLine(r.Text, 60)); err != nil {
 		return fmt.Errorf("반영 실패(원래 상태로 되돌림): %w", err)
 	}
@@ -479,7 +501,7 @@ func (a *App) Discard(id string) error {
 		// Never remove anything: the "worktree" of a read-only request is the project folder itself.
 		return a.st.SetRequestStatus(id, store.ReqDiscarded, "")
 	}
-	if r.Status == store.ReqApproved || r.Status == store.ReqDiscarded {
+	if r.Status == store.ReqApproved || r.Status == store.ReqDiscarded || r.Status == store.ReqDev {
 		return fmt.Errorf("이미 %s 상태입니다", r.Status)
 	}
 	if err := workspace.Open(r.Repo, r.Worktree, r.Branch, r.Base).Remove(true); err != nil {

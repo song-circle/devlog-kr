@@ -54,6 +54,8 @@ export function Projects():Promise<Array<store.Project>>;
 
 export function RecentWorkspaces():Promise<Array<store.Workspace>>;
 
+export function Release(arg1:number):Promise<main.ReleaseResult>;
+
 export function RemoveFolder(arg1:number):Promise<void>;
 
 export function RenameWorkspace(arg1:string):Promise<void>;

@@ -35,6 +35,7 @@ export namespace main {
 	    diff: string;
 	    answer: string;
 	    messages: store.Message[];
+	    deployTarget: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Detail(source);
@@ -49,6 +50,7 @@ export namespace main {
 	        this.diff = source["diff"];
 	        this.answer = source["answer"];
 	        this.messages = this.convertValues(source["messages"], store.Message);
+	        this.deployTarget = source["deployTarget"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -139,6 +141,22 @@ export namespace main {
 	        this.git = source["git"];
 	        this.chars = source["chars"];
 	        this.capped = source["capped"];
+	    }
+	}
+	export class ReleaseResult {
+	    url: string;
+	    created: boolean;
+	    changes: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ReleaseResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.url = source["url"];
+	        this.created = source["created"];
+	        this.changes = source["changes"];
 	    }
 	}
 	export class StartInput {
@@ -350,6 +368,8 @@ export namespace store {
 	    notes: string;
 	    copyFiles: string[];
 	    setup: string[];
+	    devBranch: string;
+	    prodBranch: string;
 	    createdAt: string;
 	
 	    static createFrom(source: any = {}) {
@@ -366,6 +386,8 @@ export namespace store {
 	        this.notes = source["notes"];
 	        this.copyFiles = source["copyFiles"];
 	        this.setup = source["setup"];
+	        this.devBranch = source["devBranch"];
+	        this.prodBranch = source["prodBranch"];
 	        this.createdAt = source["createdAt"];
 	    }
 	}

@@ -56,6 +56,9 @@ type Config struct {
 	// Preparing the work folder of code-changing modes before anyone works
 	// in it: files git ignores that the project needs are copied from the
 	// project folder, then the setup commands run (SetupTimeout each).
+	// BaseRef is where code-changing work starts (e.g. "origin/dev", the
+	// shared branch it will be deployed to); empty = the project folder's HEAD.
+	BaseRef      string        `json:"base_ref,omitempty"`
 	CopyFiles    []string      `json:"copy_files,omitempty"`
 	Setup        []string      `json:"setup,omitempty"`
 	SetupTimeout time.Duration `json:"setup_timeout,omitempty"`
@@ -189,7 +192,12 @@ func (o *Orchestrator) Prepare(cfg Config) (*Prepared, error) {
 		// files, uncommitted changes included) and no branch is made.
 		wt, err = workspace.ReadOnly(cfg.Repo)
 	} else {
-		wt, err = workspace.Create(cfg.Repo, filepath.Join(o.DataDir, "worktrees"), id)
+		root := filepath.Join(o.DataDir, "worktrees")
+		if cfg.BaseRef != "" {
+			wt, err = workspace.CreateFrom(cfg.Repo, root, id, cfg.BaseRef)
+		} else {
+			wt, err = workspace.Create(cfg.Repo, root, id)
+		}
 	}
 	if err != nil {
 		return nil, err

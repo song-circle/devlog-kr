@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { AddFolder, Projects, RemoveFolder, SaveProject } from '../wailsjs/go/main/App'
+  import { AddFolder, Projects, Release, RemoveFolder, SaveProject } from '../wailsjs/go/main/App'
   import type { store } from '../wailsjs/go/models'
   import Knowledge from './Knowledge.svelte'
 
@@ -68,12 +68,30 @@
         id: editing.id, name: editing.name, repo: editing.repo, notes: editing.notes,
         checks: editing.checksText.split('\n'), protect: editing.protectText.split(','),
         copyFiles: editing.copyText.split('\n'), setup: editing.setupText.split('\n'),
+        devBranch: editing.devBranch ?? '', prodBranch: editing.prodBranch ?? '',
       } as any)
       editing = null
       await load()
       onchanged()
     } catch (e) {
       error = String(e)
+    }
+  }
+
+  // Production release: a GitHub pull request dev → prod.
+  let releasing = $state(0)
+  let released = $state<Record<number, string>>({})
+  async function release(p: store.Project) {
+    error = ''
+    releasing = p.id
+    try {
+      const r = await Release(p.id)
+      released[p.id] = (r.created ? '운영 반영 요청(PR)을 만들었습니다' : '이미 열려 있는 운영 반영 요청이 있습니다') +
+        ` — 변경 ${r.changes?.length ?? 0}건. 브라우저에서 열었습니다: ${r.url}`
+    } catch (e) {
+      error = String(e)
+    } finally {
+      releasing = 0
     }
   }
 
@@ -128,6 +146,20 @@
       </div>
     </div>
     <div class="prep">
+      <b>반영</b>
+      <span class="muted">개발 브랜치를 적으면 AI 작업은 GitHub(origin)의 최신 개발 브랜치에서 시작하고, 승인하면 최신 개발 브랜치와 합쳐 검사를 다시 돌린 뒤 push합니다(누구나). 운영 브랜치에는 직접 반영하지 않고 GitHub PR을 만듭니다 — 승인은 GitHub에서. 비우면 이 PC의 저장소에 바로 merge합니다.</span>
+    </div>
+    <div class="grid2">
+      <div>
+        <label for="pd">개발 브랜치</label>
+        <input id="pd" bind:value={editing.devBranch} placeholder="dev (비우면 이 PC에 바로 반영)" />
+      </div>
+      <div>
+        <label for="pm">운영 브랜치</label>
+        <input id="pm" bind:value={editing.prodBranch} placeholder="main" />
+      </div>
+    </div>
+    <div class="prep">
       <b>작업 폴더 준비</b>
       <span class="muted">AI는 요청마다 git에 있는 파일만 든 별도 폴더에서 일합니다. 빌드·검사에 필요한데 git에 없는 파일은 여기서 채웁니다. 코드 수정 요청에서만, AI가 일을 시작하기 전에 실행합니다.</span>
     </div>
@@ -158,6 +190,7 @@
       <div class="row">
         <div><b class="name">{p.name}</b> <span class="mono muted">{p.repo}</span></div>
         <div class="btns">
+          {#if p.devBranch}<button disabled={releasing === p.id} onclick={() => release(p)}>{releasing === p.id ? '확인 중…' : '운영 반영 요청'}</button>{/if}
           <button onclick={() => openKnowledge(p)}>지식 문서</button>
           <button onclick={() => edit(p)}>설정</button>
           {#if list.length > 1}<button class="danger" onclick={() => remove(p)}>작업공간에서 빼기</button>{/if}
@@ -166,8 +199,10 @@
       <div class="meta">
         <span>검사: {p.checks?.length ? p.checks.join(' · ') : '없음'}</span>
         <span>보호: {p.protect?.length ? p.protect.join(', ') : '없음'}</span>
+        <span>반영: {p.devBranch ? `origin/${p.devBranch} → ${p.prodBranch}(PR)` : '이 PC에 바로'}</span>
         <span>준비: {[...(p.copyFiles ?? []).map((f) => '복사 ' + f), ...(p.setup ?? [])].join(' · ') || '없음'}</span>
       </div>
+      {#if released[p.id]}<p class="ok">{released[p.id]}</p>{/if}
       {#if p.notes}<pre class="notes">{p.notes}</pre>{/if}
     </div>
   {/each}
@@ -195,4 +230,5 @@
   .prep .muted, .small { font-size: 12px; line-height: 1.5; }
   .actions { margin-top: 14px; display: flex; gap: 8px; }
   .err { color: var(--red); }
+  .ok { color: var(--green); font-size: 13px; margin: 8px 0 0; word-break: break-all; }
 </style>

@@ -104,7 +104,11 @@
       {:else if readOnly}
         <button onclick={() => navigator.clipboard.writeText(d?.answer ?? '')} disabled={!d.answer}>답변 복사</button>
       {:else if r.status === 'DONE'}
-        <button class="ok" disabled={busy} onclick={() => act(Approve, `이 변경을 원래 저장소에 반영(merge)할까요?\n${r.repo}`)}>승인하고 반영</button>
+        {#if d.deployTarget}
+          <button class="ok" disabled={busy} onclick={() => act(Approve, `이 변경을 개발 브랜치(${d?.deployTarget})에 반영할까요?\n\n최신 ${d?.deployTarget}와 합친 뒤 준비 명령과 검사를 다시 돌리고, 통과하면 GitHub에 push합니다. 다른 사람의 변경과 충돌하거나 검사가 실패하면 반영하지 않습니다.`)}>{busy ? '반영 중… (검사 다시 실행)' : `개발(${d.deployTarget})에 반영`}</button>
+        {:else}
+          <button class="ok" disabled={busy} onclick={() => act(Approve, `이 변경을 원래 저장소에 반영(merge)할까요?\n${r.repo}`)}>승인하고 반영</button>
+        {/if}
         <button disabled={busy} onclick={() => act(Discard, '작업 폴더와 브랜치를 지울까요?')}>폐기</button>
       {:else if r.status === 'FAILED' || r.status === 'CANCELLED' || r.status === 'INTERRUPTED'}
         <button disabled={busy} onclick={() => act(Discard, '작업 폴더와 브랜치를 지울까요?')}>폐기</button>
@@ -112,7 +116,7 @@
     </div>
   </div>
   <h2>{r.text}</h2>
-  {#if r.reason}<p class="reason">{r.reason}</p>{/if}
+  {#if r.reason}<p class="reason" class:good={r.status === 'DEV'}>{r.status === 'DEV' ? '개발 반영됨: ' : ''}{r.reason}</p>{/if}
   {#if r.plan}<p class="plan"><b>PM 계획</b> {r.plan}</p>{/if}
 
   <div class="stats">
@@ -186,6 +190,7 @@
   .head .mono { margin-left: 8px; font-size: 12px; }
   h2 { font-size: 18px; margin: 14px 0 6px; line-height: 1.4; }
   .reason { color: var(--red); margin: 4px 0; }
+  .reason.good { color: var(--green); font-family: var(--mono); font-size: 13px; }
   .plan { color: var(--muted); margin: 6px 0; line-height: 1.5; }
   .plan b { color: var(--blue); margin-right: 6px; }
   .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 16px 0; }

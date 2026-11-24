@@ -21,7 +21,13 @@ type Project struct {
 	// the project folder, then Setup commands run (npm ci, code generation).
 	CopyFiles []string `json:"copyFiles"`
 	Setup     []string `json:"setup"`
-	CreatedAt string   `json:"createdAt"`
+	// Shared branches on the remote "origin". With DevBranch set, code
+	// changes start from origin/<dev> and are deployed by pushing there
+	// (anyone); ProdBranch is reached only through a pull request someone
+	// approves on GitHub. Empty DevBranch = merge into the local folder.
+	DevBranch  string `json:"devBranch"`
+	ProdBranch string `json:"prodBranch"`
+	CreatedAt  string `json:"createdAt"`
 }
 
 const projectSchema = `
@@ -51,6 +57,14 @@ func cleanList(in []string) []string {
 // to a repository root first.
 func (s *Store) SaveProject(p Project) (int64, error) {
 	p.Name = strings.TrimSpace(p.Name)
+	p.DevBranch = strings.TrimSpace(p.DevBranch)
+	p.ProdBranch = strings.TrimSpace(p.ProdBranch)
+	if p.DevBranch != "" && p.ProdBranch == "" {
+		return 0, errors.New("운영 브랜치도 적어 주세요")
+	}
+	if p.DevBranch != "" && p.DevBranch == p.ProdBranch {
+		return 0, errors.New("개발 브랜치와 운영 브랜치는 달라야 합니다")
+	}
 	p.Repo = strings.TrimSpace(p.Repo)
 	if p.Name == "" {
 		return 0, errors.New("프로젝트 이름을 적어 주세요")
@@ -63,15 +77,15 @@ func (s *Store) SaveProject(p Project) (int64, error) {
 	copies, _ := json.Marshal(cleanList(p.CopyFiles))
 	setup, _ := json.Marshal(cleanList(p.Setup))
 	if p.ID == 0 {
-		res, err := s.db.Exec(`INSERT INTO projects(name, repo, checks_json, protect_json, notes, created_at, copy_json, setup_json) VALUES (?,?,?,?,?,?,?,?)`,
-			p.Name, p.Repo, string(checks), string(protect), p.Notes, now(), string(copies), string(setup))
+		res, err := s.db.Exec(`INSERT INTO projects(name, repo, checks_json, protect_json, notes, created_at, copy_json, setup_json, dev_branch, prod_branch) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+			p.Name, p.Repo, string(checks), string(protect), p.Notes, now(), string(copies), string(setup), p.DevBranch, p.ProdBranch)
 		if err != nil {
 			return 0, err
 		}
 		return res.LastInsertId()
 	}
-	_, err := s.db.Exec(`UPDATE projects SET name=?, repo=?, checks_json=?, protect_json=?, notes=?, copy_json=?, setup_json=? WHERE id=? AND deleted=0`,
-		p.Name, p.Repo, string(checks), string(protect), p.Notes, string(copies), string(setup), p.ID)
+	_, err := s.db.Exec(`UPDATE projects SET name=?, repo=?, checks_json=?, protect_json=?, notes=?, copy_json=?, setup_json=?, dev_branch=?, prod_branch=? WHERE id=? AND deleted=0`,
+		p.Name, p.Repo, string(checks), string(protect), p.Notes, string(copies), string(setup), p.DevBranch, p.ProdBranch, p.ID)
 	return p.ID, err
 }
 
@@ -83,7 +97,7 @@ func (s *Store) DeleteProject(id int64) error {
 func scanProject(sc interface{ Scan(...any) error }) (Project, error) {
 	var p Project
 	var checks, protect, copies, setup string
-	if err := sc.Scan(&p.ID, &p.Name, &p.Repo, &checks, &protect, &p.Notes, &p.CreatedAt, &copies, &setup); err != nil {
+	if err := sc.Scan(&p.ID, &p.Name, &p.Repo, &checks, &protect, &p.Notes, &p.CreatedAt, &copies, &setup, &p.DevBranch, &p.ProdBranch); err != nil {
 		return p, err
 	}
 	json.Unmarshal([]byte(checks), &p.Checks)
@@ -106,7 +120,7 @@ func scanProject(sc interface{ Scan(...any) error }) (Project, error) {
 }
 
 func (s *Store) Projects() ([]Project, error) {
-	rows, err := s.db.Query(`SELECT id, name, repo, checks_json, protect_json, notes, created_at, copy_json, setup_json FROM projects WHERE deleted=0 ORDER BY name, id`)
+	rows, err := s.db.Query(`SELECT id, name, repo, checks_json, protect_json, notes, created_at, copy_json, setup_json, dev_branch, prod_branch FROM projects WHERE deleted=0 ORDER BY name, id`)
 	if err != nil {
 		return nil, err
 	}
@@ -123,7 +137,7 @@ func (s *Store) Projects() ([]Project, error) {
 }
 
 func (s *Store) Project(id int64) (Project, error) {
-	p, err := scanProject(s.db.QueryRow(`SELECT id, name, repo, checks_json, protect_json, notes, created_at, copy_json, setup_json FROM projects WHERE id=? AND deleted=0`, id))
+	p, err := scanProject(s.db.QueryRow(`SELECT id, name, repo, checks_json, protect_json, notes, created_at, copy_json, setup_json, dev_branch, prod_branch FROM projects WHERE id=? AND deleted=0`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return p, errors.New("없는 프로젝트입니다")
 	}
