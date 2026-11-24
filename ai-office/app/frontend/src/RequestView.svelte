@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Approve, Detail, Discard, Stop } from '../wailsjs/go/main/App'
+  import { Approve, Detail, Discard, FollowUp, Stop } from '../wailsjs/go/main/App'
   import type { main } from '../wailsjs/go/models'
 
   type Log = { id: string; t: number; role: string; line: string }
@@ -64,8 +64,37 @@
     }
   }
 
+  // Follow-up: answer the developer's question, or ask for more before deploying.
+  const followable = ['DONE', 'NO_CHANGE', 'FAILED', 'CANCELLED', 'INTERRUPTED']
+  let answer = $state('')
+  let allowProtected = $state(false)
+  let moreBudget = $state(1)
+  async function followUp() {
+    error = ''
+    busy = true
+    try {
+      await FollowUp({ id, answer, allowProtected, budgetUsd: Number(moreBudget) } as any)
+      answer = ''
+      allowProtected = false
+      tab = 'log'
+      onchanged()
+      await load()
+    } catch (e) {
+      error = String(e)
+    } finally {
+      busy = false
+    }
+  }
+  const followTitle: Record<string, string> = {
+    NO_CHANGE: 'AI가 물어봤습니다 — 답하면 이어서 합니다',
+    DONE: '반영 전에 더 고치게 하기',
+    FAILED: '방향을 알려 주고 다시 시키기',
+    CANCELLED: '이어서 시키기',
+    INTERRUPTED: '이어서 시키기',
+  }
+
   const roleColor: Record<string, string> = { pm: 'var(--blue)', dev: 'var(--accent)', qa: 'var(--green)', ask: 'var(--blue)', system: 'var(--muted)' }
-  const kindName: Record<string, string> = { plan: '계획', work: '작업', fix: '수정', review: 'QA 리뷰', answer: '답변', setup: '준비' }
+  const kindName: Record<string, string> = { plan: '계획', work: '작업', fix: '수정', review: 'QA 리뷰', answer: '답변', setup: '준비', followup: '이어서' }
   const kindLabel: Record<string, string> = {
     finding: '검토', verdict: '교차 확인', conclusion: '결론', draft: '초안', critique: '비판', revision: '수정본',
     opinion: '입장', rebuttal: '반박',
@@ -116,8 +145,28 @@
     </div>
   </div>
   <h2>{r.text}</h2>
-  {#if r.reason}<p class="reason" class:good={r.status === 'DEV'}>{r.status === 'DEV' ? '개발 반영됨: ' : ''}{r.reason}</p>{/if}
+  {#if r.reason && r.status !== 'NO_CHANGE'}<p class="reason" class:good={r.status === 'DEV'}>{r.status === 'DEV' ? '개발 반영됨: ' : ''}{r.reason}</p>{/if}
   {#if r.plan}<p class="plan"><b>PM 계획</b> {r.plan}</p>{/if}
+  {#if !readOnly && !isRunning && followable.includes(r.status)}
+    <div class="follow" class:ask={r.status === 'NO_CHANGE'}>
+      <b>{followTitle[r.status]}</b>
+      {#if d.lastAnswer}
+        <div class="said"><span class="who">AI의 마지막 말</span>{d.lastAnswer}</div>
+      {/if}
+      <textarea rows="3" bind:value={answer}
+        placeholder={r.status === 'NO_CHANGE' ? '예: 1번으로 진행해. 테스트 파일도 필드 이름 있는 형태로 바꿔도 돼.' : r.status === 'DONE' ? '예: 버튼 문구를 "내보내기"로 바꿔 줘.' : '예: 금액 계산은 건드리지 말고 화면 쪽만 고쳐 봐.'}></textarea>
+      <div class="frow">
+        {#if d.protect.length}
+          <label class="chk"><input type="checkbox" bind:checked={allowProtected} /> 이번에는 보호 파일({d.protect.join(', ')})도 고쳐도 됨</label>
+        {/if}
+        <span class="grow"></span>
+        <label class="chk" for="mb">추가 예산 $</label>
+        <input id="mb" class="num" type="number" min="0.1" step="0.5" bind:value={moreBudget} />
+        <button class="primary" disabled={busy || !answer.trim()} onclick={followUp}>이어서 시키기</button>
+      </div>
+      <span class="small">같은 작업 폴더·브랜치에서 이어서 하고, 검사를 다시 돌립니다.</span>
+    </div>
+  {/if}
 
   <div class="stats">
     <div><span>비용</span><b>${r.costUsd.toFixed(4)}</b></div>
@@ -134,7 +183,7 @@
           <td class="mono">{t.seq}</td>
           <td>{kindName[t.kind] ?? t.kind}</td>
           <td style="color:{roleColor[t.role]}">{t.role.toUpperCase()}</td>
-          <td>{t.title}</td>
+          <td>{#if t.kind === 'followup'}<span class="answered">사용자: {t.instructions}</span>{:else}{t.title}{/if}</td>
           <td><span class="status s-{t.status === 'COMPLETED' ? 'DONE' : t.status === 'IN_PROGRESS' ? 'RUNNING' : t.status}">{t.status}</span></td>
           <td class="mono">${t.costUsd.toFixed(4)}{t.estimated ? '*' : ''}</td>
           <td class="mono">{t.seconds.toFixed(0)}s</td>
@@ -192,6 +241,17 @@
   .reason { color: var(--red); margin: 4px 0; }
   .reason.good { color: var(--green); font-family: var(--mono); font-size: 13px; }
   .plan { color: var(--muted); margin: 6px 0; line-height: 1.5; }
+  .follow { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin: 12px 0; display: grid; gap: 8px; }
+  .follow.ask { border-color: var(--accent); }
+  .said { white-space: pre-wrap; line-height: 1.6; font-size: 13px; background: var(--panel2); border-radius: 6px; padding: 8px 10px; max-height: 240px; overflow-y: auto; }
+  .said .who { display: block; color: var(--muted); font-size: 11px; margin-bottom: 4px; }
+  .frow { display: flex; align-items: center; gap: 10px; }
+  .frow .grow { flex: 1; }
+  .chk { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; margin: 0; white-space: nowrap; }
+  .chk input { width: auto; margin: 0; }
+  .num { width: 70px; }
+  .small { color: var(--muted); font-size: 11px; }
+  .answered { color: var(--accent); }
   .plan b { color: var(--blue); margin-right: 6px; }
   .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 16px 0; }
   .stats div { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; }

@@ -232,14 +232,21 @@ func (p *Prepared) Execute(ctx context.Context) (*Outcome, error) {
 	} else {
 		status, reason = r.execute(ctx)
 	}
+	return r.finish(ctx, status, reason)
+}
+
+// finish records how a run ended: commits the work of a code-changing
+// request, or marks it NO_CHANGE when there is none.
+func (r *run) finish(ctx context.Context, status, reason string) (*Outcome, error) {
+	o, id, wt := r.o, r.id, r.wt
 	if ctx.Err() != nil {
 		status, reason = store.ReqCancelled, "stopped by user"
 	}
 	if status == store.ReqDone && !ReadOnly(r.cfg.Mode) {
 		// Checks pass on unchanged code too: a developer that stopped to ask
 		// a question (or did nothing) must not look like finished work
-		// (bug 017).
-		if changes, err := workspace.Status(wt.Dir); err == nil && len(changes) == 0 {
+		// (bug 017). A follow-up on committed work may add nothing new.
+		if changes, err := workspace.Status(wt.Dir); err == nil && len(changes) == 0 && wt.Head() == wt.Base {
 			status, reason = store.ReqNoChange, "AI가 파일을 하나도 바꾸지 않았습니다."
 			if last := o.Store.LastResult(id, "dev"); last != "" {
 				reason += " AI의 마지막 답: " + oneLine(last, 600)
@@ -253,6 +260,48 @@ func (p *Prepared) Execute(ctx context.Context) (*Outcome, error) {
 		return nil, err
 	}
 	return &Outcome{RequestID: id, Status: status, Reason: reason, Worktree: wt, Dir: r.dir}, nil
+}
+
+// FollowUp continues a finished request in its own work folder and
+// branch: the person answers the developer's question (or asks for a
+// change to the result), the developer works on, and the checks run
+// again. cfg is the request's configuration with fresh agents.
+func (o *Orchestrator) FollowUp(ctx context.Context, cfg Config, id string, wt *workspace.Worktree, answer string) (*Outcome, error) {
+	cfg.Mode = cfg.mode()
+	cfg.Solo = cfg.Mode == ModeSolo
+	cfg.Review = cfg.Mode == ModeReview
+	if ReadOnly(cfg.Mode) {
+		return nil, errors.New("읽기만 하는 요청은 이어서 시킬 수 없습니다")
+	}
+	r := &run{o: o, cfg: cfg, id: id, wt: wt, dir: filepath.Join(o.DataDir, "requests", id)}
+	os.MkdirAll(r.dir, 0o755)
+	st := o.Store
+	previous := st.LastResult(id, "dev")
+	if err := st.ReopenRequest(id); err != nil {
+		return nil, err
+	}
+	o.log("system", "follow-up: "+oneLine(answer, 200))
+	seq := st.TaskCount(id) + 1
+	taskID, err := st.AddTask(id, seq, "followup", "dev", "사용자 답에 따라 이어서", answer)
+	if err != nil {
+		return nil, err
+	}
+	status, reason := store.ReqDone, ""
+	_, err = r.runTask(ctx, taskID, "dev", cfg.DevModel, followUpPrompt(cfg.Request, previous, answer, r.changedFiles()),
+		devSystemPrompt(cfg.Checks, cfg.Protect), "")
+	if err != nil {
+		status, reason = store.ReqFailed, "follow-up: "+err.Error()
+	} else {
+		st.SetTaskStatus(taskID, store.Completed, "")
+		status, reason = r.verifyAndFix(ctx, seq+1)
+	}
+	return r.finish(ctx, status, reason)
+}
+
+// changedFiles lists what the request has changed so far (committed or not).
+func (r *run) changedFiles() []string {
+	out, _ := r.wt.ChangedSinceBase()
+	return out
 }
 
 func (o *Orchestrator) log(role, line string) {
@@ -286,7 +335,12 @@ func (r *run) execute(ctx context.Context) (string, string) {
 		r.o.Store.SetTaskStatus(taskID, store.Completed, "")
 	}
 
-	// Checks and fix rounds.
+	return r.verifyAndFix(ctx, len(p.Tasks)+1)
+}
+
+// verifyAndFix runs the checks (and the QA review), giving the developer
+// fix tasks until they pass or the rounds run out. seq numbers the tasks.
+func (r *run) verifyAndFix(ctx context.Context, seq int) (string, string) {
 	for round := 0; ; round++ {
 		failures, err := r.verify(ctx, round)
 		if err != nil {
@@ -317,7 +371,7 @@ func (r *run) execute(ctx context.Context) (string, string) {
 		if round >= r.cfg.MaxFixRounds {
 			return store.ReqFailed, fmt.Sprintf("verification still failing after %d fix round(s)", round)
 		}
-		taskID, err := r.o.Store.AddTask(r.id, len(p.Tasks)+round+1, "fix", "dev",
+		taskID, err := r.o.Store.AddTask(r.id, seq+round, "fix", "dev",
 			fmt.Sprintf("검사 실패 수정 %d회차", round+1), failures)
 		if err != nil {
 			return store.ReqFailed, err.Error()
@@ -765,7 +819,17 @@ func (r *run) commit() error {
 	if err != nil || len(changes) == 0 {
 		return err
 	}
-	return r.wt.Commit(workMessage(r.id, r.cfg.Requester, r.cfg.Mode, r.cfg.Request))
+	// The person's follow-up instructions belong in the record too: they can
+	// change what the original request said (e.g. "you may edit the tests").
+	var follow []string
+	if tasks, err := r.o.Store.Tasks(r.id); err == nil {
+		for _, t := range tasks {
+			if t.Kind == "followup" {
+				follow = append(follow, t.Instructions)
+			}
+		}
+	}
+	return r.wt.Commit(workMessage(r.id, r.cfg.Requester, r.cfg.Mode, r.cfg.Request, follow...))
 }
 
 func rel(dir, p string) string {

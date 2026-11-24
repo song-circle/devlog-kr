@@ -18,7 +18,7 @@ const (
 
 // workMessage is the message of a request's work commit: a one-line
 // subject, the full request, and the trailers.
-func workMessage(id, requester, mode, request string) string {
+func workMessage(id, requester, mode, request string, followUps ...string) string {
 	var b strings.Builder
 	b.WriteString("AI Office: " + oneLine(request, 60) + "\n\n")
 	body := strings.TrimSpace(request)
@@ -26,6 +26,13 @@ func workMessage(id, requester, mode, request string) string {
 		body = string(r[:2000]) + "..."
 	}
 	b.WriteString(body + "\n\n")
+	if len(followUps) > 0 {
+		b.WriteString("이어서 한 지시:\n")
+		for _, f := range followUps {
+			b.WriteString("- " + oneLine(f, 300) + "\n")
+		}
+		b.WriteString("\n")
+	}
 	fmt.Fprintf(&b, "%s: %s\n", TrailerRequest, id)
 	if requester = oneLine(requester, 80); requester != "" {
 		fmt.Fprintf(&b, "%s: %s\n", TrailerRequester, requester)

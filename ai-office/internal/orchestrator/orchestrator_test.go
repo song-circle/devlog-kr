@@ -405,3 +405,55 @@ func TestNoChangeIsNotDone(t *testing.T) {
 		t.Errorf("a commit was made")
 	}
 }
+
+// The developer asked a question (NO_CHANGE); the person answers and the
+// same request continues in its work folder: changes, checks, commit. A
+// second follow-up on the finished work adds another commit.
+func TestFollowUp(t *testing.T) {
+	repo := newRepo(t)
+	data := t.TempDir()
+	st, _ := store.Open(filepath.Join(data, "aio.db"))
+	defer st.Close()
+	fe := &fakeEngine{t: t, dev: []func(string){
+		func(string) {}, // asks instead of working
+		func(d string) { write(t, d, "a.txt", "ok\n") },
+		func(d string) { write(t, d, "b.txt", "more\n") },
+	}}
+	o := &Orchestrator{Engine: fe, Store: st, DataDir: data}
+	cfg := Config{Repo: repo, Request: "a를 만들어", Mode: ModeSolo, BudgetUSD: 5, Checks: []string{"exit 0"}}
+	out, err := o.Run(context.Background(), cfg)
+	if err != nil || out.Status != store.ReqNoChange {
+		t.Fatalf("%v %+v", err, out)
+	}
+	out2, err := o.FollowUp(context.Background(), cfg, out.RequestID, out.Worktree, "1번으로 진행해")
+	if err != nil || out2.Status != store.ReqDone {
+		t.Fatalf("%v %+v", err, out2)
+	}
+	p := fe.calls[1].Prompt
+	if !strings.Contains(p, "1번으로 진행해") || !strings.Contains(p, "did it") || !strings.Contains(p, "바뀐 파일은 없다") {
+		t.Errorf("follow-up prompt:\n%s", p)
+	}
+	out3, err := o.FollowUp(context.Background(), cfg, out.RequestID, out.Worktree, "b도 추가해")
+	if err != nil || out3.Status != store.ReqDone {
+		t.Fatalf("%v %+v", err, out3)
+	}
+	if !strings.Contains(fe.calls[2].Prompt, "a.txt") {
+		t.Errorf("second follow-up does not see earlier changes:\n%s", fe.calls[2].Prompt)
+	}
+	n, _ := exec.Command("git", "-C", out.Worktree.Dir, "rev-list", "--count", out.Worktree.Base+"..HEAD").Output()
+	if strings.TrimSpace(string(n)) != "2" {
+		t.Errorf("commits on the request branch = %s", n)
+	}
+	msg, _ := exec.Command("git", "-C", out.Worktree.Dir, "log", "-1", "--format=%B").Output()
+	if !strings.Contains(string(msg), "- 1번으로 진행해") || !strings.Contains(string(msg), "- b도 추가해") {
+		t.Errorf("commit message lacks the follow-ups:\n%s", msg)
+	}
+	tasks, _ := st.Tasks(out.RequestID)
+	var kinds []string
+	for _, tk := range tasks {
+		kinds = append(kinds, tk.Kind)
+	}
+	if strings.Join(kinds, ",") != "work,followup,followup" {
+		t.Errorf("tasks %v", kinds)
+	}
+}

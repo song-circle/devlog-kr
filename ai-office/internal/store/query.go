@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"github.com/song-circle/devlog-kr/ai-office/internal/proc"
 )
 
 // Statuses set by the user after a request is DONE.
@@ -116,6 +118,20 @@ func (s *Store) LastResult(reqID, role string) string {
 	return t
 }
 
+// ReopenRequest puts a finished request back to RUNNING for a follow-up,
+// owned by this process.
+func (s *Store) ReopenRequest(id string) error {
+	_, err := s.db.Exec(`UPDATE requests SET status=?, reason='', finished_at=NULL, owner=? WHERE id=?`, ReqRunning, proc.SelfToken(), id)
+	return err
+}
+
+// TaskCount is how many tasks a request has.
+func (s *Store) TaskCount(id string) int {
+	var n int
+	s.db.QueryRow(`SELECT COUNT(*) FROM tasks WHERE request_id=?`, id).Scan(&n)
+	return n
+}
+
 // WorkCommit is the commit a deployed request made ("" if not deployed).
 func (s *Store) WorkCommit(id string) string {
 	var c string
@@ -131,20 +147,23 @@ func (s *Store) SetRequestStatus(id, status, reason string) error {
 
 // TaskRow is a task with its run totals.
 type TaskRow struct {
-	ID       int64   `json:"id"`
-	Seq      int     `json:"seq"`
-	Kind     string  `json:"kind"`
-	Role     string  `json:"role"`
-	Title    string  `json:"title"`
-	Status   string  `json:"status"`
-	Result   string  `json:"result"`
-	CostUSD  float64 `json:"costUsd"`
-	Seconds  float64 `json:"seconds"`
-	Estimate bool    `json:"estimated"`
+	ID     int64  `json:"id"`
+	Seq    int    `json:"seq"`
+	Kind   string `json:"kind"`
+	Role   string `json:"role"`
+	Title  string `json:"title"`
+	Status string `json:"status"`
+	Result string `json:"result"`
+	// Instructions is what the task was given (for a follow-up: the
+	// person's answer).
+	Instructions string  `json:"instructions"`
+	CostUSD      float64 `json:"costUsd"`
+	Seconds      float64 `json:"seconds"`
+	Estimate     bool    `json:"estimated"`
 }
 
 func (s *Store) Tasks(reqID string) ([]TaskRow, error) {
-	rows, err := s.db.Query(`SELECT t.id, t.seq, t.kind, t.role, t.title, t.status, t.result,
+	rows, err := s.db.Query(`SELECT t.id, t.seq, t.kind, t.role, t.title, t.status, t.result, t.instructions,
 			COALESCE(SUM(r.cost_usd),0), COALESCE(SUM(r.duration_ms),0)/1000.0, COALESCE(MAX(r.cost_estimated),0)
 		FROM tasks t LEFT JOIN runs r ON r.task_id = t.id WHERE t.request_id=? GROUP BY t.id ORDER BY t.id`, reqID)
 	if err != nil {
@@ -154,7 +173,7 @@ func (s *Store) Tasks(reqID string) ([]TaskRow, error) {
 	out := []TaskRow{}
 	for rows.Next() {
 		var t TaskRow
-		if err := rows.Scan(&t.ID, &t.Seq, &t.Kind, &t.Role, &t.Title, &t.Status, &t.Result, &t.CostUSD, &t.Seconds, &t.Estimate); err != nil {
+		if err := rows.Scan(&t.ID, &t.Seq, &t.Kind, &t.Role, &t.Title, &t.Status, &t.Result, &t.Instructions, &t.CostUSD, &t.Seconds, &t.Estimate); err != nil {
 			return nil, err
 		}
 		out = append(out, t)

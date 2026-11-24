@@ -22,6 +22,8 @@ export function Discard(arg1:string):Promise<void>;
 
 export function Employees():Promise<Array<main.EmployeeView>>;
 
+export function FollowUp(arg1:main.FollowUpInput):Promise<void>;
+
 export function ForgetWorkspace(arg1:number):Promise<void>;
 
 export function Knowledge(arg1:number):Promise<main.KnowledgeView>;

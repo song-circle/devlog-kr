@@ -159,6 +159,17 @@ func DiffBranch(repo, base, branch string) (string, error) {
 	return git(repo, "diff", base+".."+branch)
 }
 
+// ChangedSinceBase lists files changed since the base commit, committed
+// or not (new files included).
+func (w *Worktree) ChangedSinceBase() ([]string, error) {
+	git(w.Dir, "add", "--intent-to-add", "--all")
+	out, err := git(w.Dir, "diff", "--name-only", w.Base)
+	if err != nil {
+		return nil, err
+	}
+	return strings.Fields(out), nil
+}
+
 // DiffStat summarizes the branch against its base.
 func (w *Worktree) DiffStat() (string, error) {
 	return git(w.Dir, "diff", "--stat", w.Base)

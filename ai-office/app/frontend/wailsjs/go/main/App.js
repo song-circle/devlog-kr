@@ -38,6 +38,10 @@ export function Employees() {
   return window['go']['main']['App']['Employees']();
 }
 
+export function FollowUp(arg1) {
+  return window['go']['main']['App']['FollowUp'](arg1);
+}
+
 export function ForgetWorkspace(arg1) {
   return window['go']['main']['App']['ForgetWorkspace'](arg1);
 }

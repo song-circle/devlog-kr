@@ -387,6 +387,10 @@ type Detail struct {
 	// DeployTarget is where approving puts the change: "origin/dev" for a
 	// project with a development branch, "" for the local folder.
 	DeployTarget string `json:"deployTarget"`
+	// LastAnswer is the developer's last words (a report, or a question
+	// to answer); Protect the project's protected files (for follow-ups).
+	LastAnswer string   `json:"lastAnswer"`
+	Protect    []string `json:"protect"`
 }
 
 // LastProjectID is the project used last time (0 if none).
@@ -414,7 +418,15 @@ func (a *App) Detail(id string) (*Detail, error) {
 		return nil, err
 	}
 	d := &Detail{Request: r}
-	_, d.DeployTarget = a.deployTarget(r.ProjectID)
+	var proj store.Project
+	proj, d.DeployTarget = a.deployTarget(r.ProjectID)
+	d.Protect = proj.Protect
+	if d.Protect == nil {
+		d.Protect = []string{}
+	}
+	if !readOnly(r) {
+		d.LastAnswer = a.st.LastResult(id, "dev")
+	}
 	if d.Messages, err = a.st.Messages(id); err != nil {
 		return nil, err
 	}

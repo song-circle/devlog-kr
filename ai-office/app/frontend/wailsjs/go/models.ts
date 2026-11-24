@@ -100,6 +100,8 @@ export namespace main {
 	    answer: string;
 	    messages: store.Message[];
 	    deployTarget: string;
+	    lastAnswer: string;
+	    protect: string[];
 	
 	    static createFrom(source: any = {}) {
 	        return new Detail(source);
@@ -115,6 +117,8 @@ export namespace main {
 	        this.answer = source["answer"];
 	        this.messages = this.convertValues(source["messages"], store.Message);
 	        this.deployTarget = source["deployTarget"];
+	        this.lastAnswer = source["lastAnswer"];
+	        this.protect = source["protect"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -182,6 +186,24 @@ export namespace main {
 		    }
 		    return a;
 		}
+	}
+	export class FollowUpInput {
+	    id: string;
+	    answer: string;
+	    allowProtected: boolean;
+	    budgetUsd: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new FollowUpInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.answer = source["answer"];
+	        this.allowProtected = source["allowProtected"];
+	        this.budgetUsd = source["budgetUsd"];
+	    }
 	}
 	export class KnowledgeView {
 	    projectId: number;
@@ -565,6 +587,7 @@ export namespace store {
 	    title: string;
 	    status: string;
 	    result: string;
+	    instructions: string;
 	    costUsd: number;
 	    seconds: number;
 	    estimated: boolean;
@@ -582,6 +605,7 @@ export namespace store {
 	        this.title = source["title"];
 	        this.status = source["status"];
 	        this.result = source["result"];
+	        this.instructions = source["instructions"];
 	        this.costUsd = source["costUsd"];
 	        this.seconds = source["seconds"];
 	        this.estimated = source["estimated"];

@@ -224,3 +224,21 @@ func learnPrompt(focus, current string) string {
 	}
 	return b.String()
 }
+
+// followUpPrompt continues a request with the person's answer.
+func followUpPrompt(request, previous, answer string, changed []string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "사용자 요청(처음):\n%s\n\n", request)
+	if strings.TrimSpace(previous) != "" {
+		fmt.Fprintf(&b, "지난번에 네가 마지막으로 한 말(보고 또는 질문):\n%s\n\n", previous)
+	}
+	if len(changed) > 0 {
+		fmt.Fprintf(&b, "지금까지 이 요청에서 바뀐 파일: %s\n\n", strings.Join(changed, ", "))
+	} else {
+		b.WriteString("지금까지 이 요청에서 바뀐 파일은 없다.\n\n")
+	}
+	fmt.Fprintf(&b, "사용자의 답(이번 지시):\n%s\n\n", answer)
+	b.WriteString("사용자의 답에 따라 작업을 이어서 한다. 답이 질문에 대한 선택이면 그 선택대로 진행한다. " +
+		"끝나면 무엇을 바꿨는지 한국어로 두세 문장으로 보고한다. 또 확인이 필요하면 파일을 바꾸지 말고 질문만 남긴다.")
+	return b.String()
+}
