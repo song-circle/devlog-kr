@@ -42,6 +42,10 @@ export function ForgetWorkspace(arg1) {
   return window['go']['main']['App']['ForgetWorkspace'](arg1);
 }
 
+export function Knowledge(arg1) {
+  return window['go']['main']['App']['Knowledge'](arg1);
+}
+
 export function LastProjectID() {
   return window['go']['main']['App']['LastProjectID']();
 }
@@ -112,6 +116,10 @@ export function Running() {
 
 export function SaveEmployee(arg1) {
   return window['go']['main']['App']['SaveEmployee'](arg1);
+}
+
+export function SaveKnowledge(arg1, arg2) {
+  return window['go']['main']['App']['SaveKnowledge'](arg1, arg2);
 }
 
 export function SaveProject(arg1) {

@@ -2,8 +2,16 @@
   import { onMount } from 'svelte'
   import { AddFolder, Projects, RemoveFolder, SaveProject } from '../wailsjs/go/main/App'
   import type { store } from '../wailsjs/go/models'
+  import Knowledge from './Knowledge.svelte'
 
-  let { onchanged }: { onchanged: () => void } = $props()
+  let { onchanged, onstarted, draft, ondraftdone }: {
+    onchanged: () => void; onstarted: (id: string) => void
+    draft: { projectId: number; text: string } | null; ondraftdone: () => void
+  } = $props()
+
+  // Folder whose knowledge document is open, and the AI draft to review in it.
+  let knowledgeOf = $state<store.Project | null>(null)
+  let knowledgeDraft = $state<string | null>(null)
 
   let list = $state<store.Project[]>([])
   let editing = $state<any | null>(null)
@@ -16,10 +24,25 @@
       error = String(e)
     }
   }
-  onMount(load)
+  onMount(async () => {
+    await load()
+    if (draft) {
+      knowledgeOf = list.find((p) => p.id === draft.projectId) ?? null
+      knowledgeDraft = draft.text
+      editing = null
+      ondraftdone()
+    }
+  })
+
+  function openKnowledge(p: store.Project) {
+    editing = null
+    knowledgeDraft = null
+    knowledgeOf = p
+  }
 
   function edit(p: store.Project) {
     error = ''
+    knowledgeOf = null
     editing = { ...p, checksText: (p.checks ?? []).join('\n'), protectText: (p.protect ?? []).join(', ') }
   }
 
@@ -72,6 +95,12 @@
 </div>
 {#if error}<p class="err">{error}</p>{/if}
 
+{#if knowledgeOf}
+  {#key knowledgeOf.id}
+    <Knowledge project={knowledgeOf} draft={knowledgeDraft} onclose={() => { knowledgeOf = null; knowledgeDraft = null }} {onstarted} />
+  {/key}
+{/if}
+
 {#if editing}
   <div class="card edit">
     <div class="grid2">
@@ -109,6 +138,7 @@
       <div class="row">
         <div><b class="name">{p.name}</b> <span class="mono muted">{p.repo}</span></div>
         <div class="btns">
+          <button onclick={() => openKnowledge(p)}>지식 문서</button>
           <button onclick={() => edit(p)}>설정</button>
           {#if list.length > 1}<button class="danger" onclick={() => remove(p)}>작업공간에서 빼기</button>{/if}
         </div>

@@ -117,6 +117,30 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class KnowledgeView {
+	    projectId: number;
+	    text: string;
+	    path: string;
+	    exists: boolean;
+	    git: string;
+	    chars: number;
+	    capped: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new KnowledgeView(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.projectId = source["projectId"];
+	        this.text = source["text"];
+	        this.path = source["path"];
+	        this.exists = source["exists"];
+	        this.git = source["git"];
+	        this.chars = source["chars"];
+	        this.capped = source["capped"];
+	    }
+	}
 	export class StartInput {
 	    projectId: number;
 	    request: string;

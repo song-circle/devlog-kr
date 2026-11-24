@@ -17,6 +17,7 @@ import (
 
 	"github.com/song-circle/devlog-kr/ai-office/internal/check"
 	"github.com/song-circle/devlog-kr/ai-office/internal/engine"
+	"github.com/song-circle/devlog-kr/ai-office/internal/knowledge"
 	"github.com/song-circle/devlog-kr/ai-office/internal/ollama"
 	"github.com/song-circle/devlog-kr/ai-office/internal/store"
 	"github.com/song-circle/devlog-kr/ai-office/internal/workspace"
@@ -48,6 +49,10 @@ type Config struct {
 	// (stack, rules, background) are added to every employee's instructions.
 	ProjectID    int64  `json:"project_id,omitempty"`
 	ProjectNotes string `json:"project_notes,omitempty"`
+	// Knowledge is the project's knowledge document (.aioffice/knowledge.md),
+	// added to every employee's instructions; in learn mode it is the
+	// document being updated instead.
+	Knowledge string `json:"-"`
 	// Panels hold meetings instead of single employees: "review" (QA review
 	// stage and the audit mode) is a cross-review when it has 2+ members.
 	// "plan" (planning in plan and team modes) is a draft-critique meeting
@@ -65,11 +70,12 @@ const (
 	ModeTeam    = "team"    // PM + developer + checks
 	ModeReview  = "review"  // team + QA reviewer
 	ModeMeeting = "meeting" // several employees discuss, a moderator concludes
+	ModeLearn   = "learn"   // read the project and write its knowledge document
 )
 
 // ReadOnly reports whether a mode only reads the project (no worktree, no branch).
 func ReadOnly(mode string) bool {
-	return mode == ModeAsk || mode == ModePlan || mode == ModeAudit || mode == ModeMeeting
+	return mode == ModeAsk || mode == ModePlan || mode == ModeAudit || mode == ModeMeeting || mode == ModeLearn
 }
 
 func (c *Config) mode() string {
@@ -358,6 +364,9 @@ func (r *run) runAgent(ctx context.Context, taskID int64, role string, ag Agent,
 	if ag.Model != "" {
 		model = ag.Model
 	}
+	if doc := knowledge.ForPrompt(r.cfg.Knowledge); doc != "" && r.cfg.Mode != ModeLearn {
+		system += "\n\n프로젝트 지식 문서(" + knowledge.RelPath + ", 이 프로젝트에 대해 먼저 알아야 할 것. 코드와 다르면 코드가 맞다):\n" + doc
+	}
 	if notes := strings.TrimSpace(r.cfg.ProjectNotes); notes != "" {
 		system += "\n\n프로젝트 설명(사용자가 등록한 배경·규칙, 반드시 따른다):\n" + notes
 	}
@@ -496,6 +505,8 @@ func (r *run) answer(ctx context.Context) (string, string) {
 		role, title, system = "pm", "기획", planDocSystemPrompt()
 	case ModeAudit:
 		role, title, system = "qa", "코드 검토", auditSystemPrompt()
+	case ModeLearn:
+		return r.learn(ctx)
 	}
 	if r.cfg.Mode == ModeMeeting {
 		panel := r.cfg.Panels["meeting"]
@@ -553,6 +564,31 @@ func (r *run) answer(ctx context.Context) (string, string) {
 	r.o.Store.SetTaskStatus(taskID, store.Completed, "")
 	os.WriteFile(filepath.Join(r.dir, "answer.md"), []byte(res.Text), 0o644)
 	r.o.log(role, fmt.Sprintf("answer written (%d chars)", len([]rune(res.Text))))
+	return store.ReqDone, ""
+}
+
+// learn has one employee read the project and draft its knowledge document.
+// The draft is the request's answer; the person reviews it before it is
+// saved to the repository. The human section of the current document is
+// carried over by code, whatever the AI wrote.
+func (r *run) learn(ctx context.Context) (string, string) {
+	taskID, err := r.o.Store.AddTask(r.id, 1, "answer", "ask", "프로젝트 파악", r.cfg.Request)
+	if err != nil {
+		return store.ReqFailed, err.Error()
+	}
+	res, err := r.runTask(ctx, taskID, "ask", r.cfg.DevModel, learnPrompt(r.cfg.Request, r.cfg.Knowledge), learnSystemPrompt(), "")
+	if err != nil {
+		return store.ReqFailed, err.Error()
+	}
+	if strings.TrimSpace(res.Text) == "" {
+		r.o.Store.SetTaskStatus(taskID, store.Failed, "empty document")
+		return store.ReqFailed, "AI가 빈 문서를 냈습니다"
+	}
+	doc := knowledge.Merge(res.Text, r.cfg.Knowledge)
+	r.o.Store.SetTaskResult(taskID, 1, doc)
+	r.o.Store.SetTaskStatus(taskID, store.Completed, "")
+	os.WriteFile(filepath.Join(r.dir, "answer.md"), []byte(doc), 0o644)
+	r.o.log("ask", fmt.Sprintf("knowledge draft written (%d chars)", len([]rune(doc))))
 	return store.ReqDone, ""
 }
 

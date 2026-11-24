@@ -3,15 +3,16 @@
   import type { main } from '../wailsjs/go/models'
 
   type Log = { id: string; t: number; role: string; line: string }
-  let { id, live, isRunning, tick, onchanged }: {
+  let { id, live, isRunning, tick, onchanged, onknowledge }: {
     id: string; live: Log[]; isRunning: boolean; tick: number; onchanged: () => void
+    onknowledge: (projectId: number, draft: string) => void
   } = $props()
 
   let d = $state<main.Detail | null>(null)
   let error = $state('')
   let busy = $state(false)
   let tab = $state<'answer' | 'meeting' | 'log' | 'diff' | 'report'>('log')
-  let readOnly = $derived(['ask', 'plan', 'audit', 'meeting'].includes(d?.request.mode ?? ''))
+  let readOnly = $derived(['ask', 'plan', 'audit', 'meeting', 'learn'].includes(d?.request.mode ?? ''))
   let shownAnswer = false
   let shownMeeting = false
   // Who is talking right now: speakers whose latest log line is not "done:".
@@ -98,6 +99,8 @@
     <div class="buttons">
       {#if isRunning}
         <button class="danger" disabled={busy} onclick={() => act(async (x) => Stop(x), '실행을 중지할까요? 실행 중인 AI 프로세스가 모두 종료됩니다.')}>중지</button>
+      {:else if r.mode === 'learn'}
+        <button class="ok" disabled={!d.answer || r.status !== 'DONE'} onclick={() => onknowledge(r.projectId, d?.answer ?? '')}>검토하고 지식 문서로 저장</button>
       {:else if readOnly}
         <button onclick={() => navigator.clipboard.writeText(d?.answer ?? '')} disabled={!d.answer}>답변 복사</button>
       {:else if r.status === 'DONE'}
@@ -137,7 +140,7 @@
   </table>
 
   <div class="tabs">
-    {#if readOnly}<button class:on={tab === 'answer'} onclick={() => (tab = 'answer')}>{r.mode === 'plan' ? '기획서' : r.mode === 'audit' ? '검토 결과' : '답변'}</button>{/if}
+    {#if readOnly}<button class:on={tab === 'answer'} onclick={() => (tab = 'answer')}>{r.mode === 'plan' ? '기획서' : r.mode === 'audit' ? '검토 결과' : r.mode === 'learn' ? '지식 문서 초안' : '답변'}</button>{/if}
     {#if d.messages.length}<button class:on={tab === 'meeting'} onclick={() => (tab = 'meeting')}>회의 ({d.messages.length})</button>{/if}
     <button class:on={tab === 'log'} onclick={() => (tab = 'log')}>진행 기록</button>
     {#if !readOnly}<button class:on={tab === 'diff'} onclick={() => (tab = 'diff')}>변경 내용</button>{/if}

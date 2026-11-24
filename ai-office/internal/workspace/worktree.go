@@ -105,6 +105,19 @@ func Status(dir string) ([]Change, error) {
 	return changes, nil
 }
 
+// PathStatus is the two-letter git status of one path in repo ("" when it
+// is committed and unchanged, "??" when git does not track it yet).
+func PathStatus(repo, path string) (string, error) {
+	out, err := git(repo, "status", "--porcelain=v1", "--untracked-files=all", "--", path)
+	if err != nil {
+		return "", err
+	}
+	if len(out) < 2 {
+		return "", nil
+	}
+	return out[:2], nil
+}
+
 // Diff returns the full diff of dir against its base, including new files.
 func (w *Worktree) Diff() (string, error) {
 	// Mark untracked files as intent-to-add so they show up in the diff.

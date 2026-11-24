@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/song-circle/devlog-kr/ai-office/internal/engine"
+	"github.com/song-circle/devlog-kr/ai-office/internal/knowledge"
 	"github.com/song-circle/devlog-kr/ai-office/internal/store"
 )
 
@@ -257,5 +258,53 @@ func TestReadOnlyModeMakesNoBranch(t *testing.T) {
 	r, _ := st.GetRequest(out.RequestID)
 	if r.Mode != ModeAsk || r.Branch != "" {
 		t.Errorf("request mode %q branch %q", r.Mode, r.Branch)
+	}
+}
+
+// Every employee sees the knowledge document in its instructions.
+func TestKnowledgeInInstructions(t *testing.T) {
+	repo := newRepo(t)
+	data := t.TempDir()
+	st, _ := store.Open(filepath.Join(data, "aio.db"))
+	defer st.Close()
+	fe := &fakeEngine{t: t, dev: []func(string){func(string) {}}}
+	o := &Orchestrator{Engine: fe, Store: st, DataDir: data}
+	if _, err := o.Run(context.Background(), Config{Repo: repo, Request: "주문 화면은 어디야?", Mode: ModeAsk,
+		Knowledge: "## 화면·기능 → 코드 지도\n- 주문 목록: web/orders.go"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(fe.calls[0].SystemPrompt, "web/orders.go") {
+		t.Errorf("knowledge missing from system prompt")
+	}
+}
+
+// Learn mode: the current document goes in the prompt to be updated, the
+// draft keeps the person's section, and nothing is written to the project
+// until the person saves it.
+func TestLearnDraftsKnowledge(t *testing.T) {
+	repo := newRepo(t)
+	data := t.TempDir()
+	st, _ := store.Open(filepath.Join(data, "aio.db"))
+	defer st.Close()
+	fe := &fakeEngine{t: t, dev: []func(string){func(string) {}}}
+	o := &Orchestrator{Engine: fe, Store: st, DataDir: data}
+	current := "# 문서\n\n## 구조\n옛날\n\n" + knowledge.HumanHeading + "\n- 결제는 건드리지 말 것\n"
+	out, err := o.Run(context.Background(), Config{Repo: repo, Request: "", Mode: ModeLearn, Knowledge: current})
+	if err != nil || out.Status != store.ReqDone {
+		t.Fatalf("%v %+v", err, out)
+	}
+	c := fe.calls[0]
+	if !strings.Contains(c.Prompt, "옛날") || strings.Contains(c.SystemPrompt, "옛날") {
+		t.Errorf("current document should be in the prompt only")
+	}
+	if strings.Join(c.Tools, ",") != "Read,Glob,Grep" {
+		t.Errorf("tools %v", c.Tools)
+	}
+	b, _ := os.ReadFile(filepath.Join(out.Dir, "answer.md"))
+	if !strings.HasPrefix(string(b), "did it") || !strings.Contains(string(b), "결제는 건드리지 말 것") {
+		t.Errorf("draft = %q", b)
+	}
+	if _, err := os.Stat(knowledge.Path(repo)); err == nil {
+		t.Errorf("learn wrote the document into the project")
 	}
 }

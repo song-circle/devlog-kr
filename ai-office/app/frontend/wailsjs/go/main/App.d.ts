@@ -24,6 +24,8 @@ export function Employees():Promise<Array<main.EmployeeView>>;
 
 export function ForgetWorkspace(arg1:number):Promise<void>;
 
+export function Knowledge(arg1:number):Promise<main.KnowledgeView>;
+
 export function LastProjectID():Promise<number>;
 
 export function List():Promise<Array<store.RequestRow>>;
@@ -59,6 +61,8 @@ export function RenameWorkspace(arg1:string):Promise<void>;
 export function Running():Promise<Array<string>>;
 
 export function SaveEmployee(arg1:store.Employee):Promise<number>;
+
+export function SaveKnowledge(arg1:number,arg2:string):Promise<main.KnowledgeView>;
 
 export function SaveProject(arg1:store.Project):Promise<number>;
 

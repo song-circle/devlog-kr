@@ -14,6 +14,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"github.com/song-circle/devlog-kr/ai-office/internal/engine/claudecode"
+	"github.com/song-circle/devlog-kr/ai-office/internal/knowledge"
 	"github.com/song-circle/devlog-kr/ai-office/internal/ollama"
 	"github.com/song-circle/devlog-kr/ai-office/internal/orchestrator"
 	"github.com/song-circle/devlog-kr/ai-office/internal/report"
@@ -167,7 +168,7 @@ type StartInput struct {
 // slotsFor lists who takes part in each mode.
 func slotsFor(mode string) ([]string, error) {
 	switch mode {
-	case orchestrator.ModeAsk:
+	case orchestrator.ModeAsk, orchestrator.ModeLearn:
 		return []string{"ask"}, nil
 	case orchestrator.ModePlan:
 		return []string{"pm"}, nil
@@ -269,6 +270,10 @@ func (a *App) Start(in StartInput) (string, error) {
 	if in.BudgetUSD <= 0 {
 		in.BudgetUSD = 2
 	}
+	doc, err := knowledge.Load(top)
+	if err != nil {
+		return "", fmt.Errorf("지식 문서를 읽지 못했습니다: %w", err)
+	}
 
 	id := orchestrator.NewID()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -286,10 +291,10 @@ func (a *App) Start(in StartInput) (string, error) {
 		},
 	}
 	cfg := orchestrator.Config{
-		ID: id, Repo: top, Request: in.Request, Checks: proj.Checks, Protect: proj.Protect,
+		ID: id, Repo: top, Request: in.Request, Checks: proj.Checks, Protect: append(proj.Protect, knowledge.RelPath), // the document changes only through review
 		PMModel: "sonnet", DevModel: "sonnet", Agents: agents, MaxFixRounds: in.FixRounds, BudgetUSD: in.BudgetUSD,
 		TaskTimeout: 15 * time.Minute, CheckTimeout: 5 * time.Minute,
-		Mode: in.Mode, ProjectID: proj.ID, ProjectNotes: proj.Notes, Panels: panels, MeetingRounds: in.Rounds,
+		Mode: in.Mode, ProjectID: proj.ID, ProjectNotes: proj.Notes, Knowledge: doc, Panels: panels, MeetingRounds: in.Rounds,
 	}
 	// Create the worktree and the database row now, so the request exists
 	// (and setup errors reach the form) before this call returns.

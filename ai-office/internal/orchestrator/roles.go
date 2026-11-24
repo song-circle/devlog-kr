@@ -183,3 +183,44 @@ func auditSystemPrompt() string {
 		"결과 구성: 요약 한 단락 → 결함 목록(심각도 높음/중간/낮음, 파일:줄, 무엇이 왜 틀렸는지, 재현 입력이나 근거, 고치는 방법) → 확인했지만 문제없던 부분. " +
 		"확신이 없는 항목은 '확인 필요'로 따로 표시한다."
 }
+
+// learnSystemPrompt makes an employee read the whole project and write its
+// knowledge document. The human section is added by the app, not the AI.
+func learnSystemPrompt() string {
+	return readOnlyRule + "너는 이 프로젝트를 처음 넘겨받아 파악하는 시니어 개발자다. 저장소를 실제로 읽고, " +
+		"다음에 이 프로젝트를 고칠 사람(사람과 AI 모두)이 가장 먼저 읽을 **프로젝트 지식 문서**를 쓴다.\n\n" +
+		"문서 구성(이 제목 그대로, 해당 없는 항목은 '해당 없음'):\n" +
+		"# <프로젝트 이름> 프로젝트 지식 문서\n" +
+		"## 한 줄 요약 — 무엇을 하는 프로그램이고 누가 쓰는지\n" +
+		"## 기술 스택과 실행 방법 — 언어·프레임워크·버전, 빌드·실행·테스트 명령, 필요한 설정 파일(값이 아니라 이름과 용도만)\n" +
+		"## 폴더 구조 — 주요 폴더와 파일의 역할\n" +
+		"## 화면·기능 → 코드 지도 — 사용자가 부르는 이름(화면, 버튼, 메뉴, 보고서, API) → 그 일을 하는 파일·함수. 개발을 모르는 사람이 '주문 목록 화면의 엑셀 버튼'처럼 말해도 찾아갈 수 있게. 이 문서에서 가장 중요한 부분이다\n" +
+		"## 데이터 — DB 테이블·주요 데이터 구조·외부 연동(API, 파일), 어디서 만들고 어디서 읽는지\n" +
+		"## 용어집 — 업무 용어 ↔ 코드 이름\n" +
+		"## 규칙과 관례 — 코드에서 실제로 지켜지고 있는 방식(이름 짓기, 오류 처리, 화면 문구 언어, 테스트 방식)\n" +
+		"## 위험 영역 — 고치면 영향이 큰 곳(인증, 결제·금액, DB 스키마·마이그레이션, 배포·운영 설정, 여러 곳에서 쓰는 공통 코드)과 이유\n" +
+		"## 모르는 것 — 코드만으로는 알 수 없어서 사람에게 물어야 할 질문\n\n" +
+		"작성 규칙:\n" +
+		"- 모든 경로는 저장소 기준 상대 경로. 읽어서 확인한 것만 쓰고, 추측은 '(추정)'이라고 표시한다.\n" +
+		"- 비밀번호, API 키, 토큰, 접속 주소 같은 비밀 값은 절대 옮겨 적지 않는다(.env 같은 파일은 이름과 용도만).\n" +
+		"- '" + "## 사람이 적은 내용" + "' 칸은 쓰지 않는다(시스템이 붙인다).\n" +
+		"- 전체 2만 자 안쪽. 출력은 문서 마크다운만(앞뒤 인사나 설명 없이)."
+}
+
+// learnPrompt is the request for a knowledge document, with the current
+// document to update if there is one.
+func learnPrompt(focus, current string) string {
+	var b strings.Builder
+	if strings.TrimSpace(focus) != "" {
+		fmt.Fprintf(&b, "사용자 요청(특히 볼 부분):\n%s\n\n", focus)
+	}
+	if strings.TrimSpace(current) == "" {
+		b.WriteString("아직 지식 문서가 없다. 저장소를 처음부터 파악해서 새로 쓴다.")
+	} else {
+		b.WriteString("지금 지식 문서가 아래에 있다. 코드를 다시 읽어서 지금 코드와 다른 부분은 고치고, 빠진 것은 채우고, 맞는 내용은 유지한 전체 문서를 다시 쓴다.\n\n")
+		b.WriteString("----- 지금 문서 -----\n")
+		b.WriteString(current)
+		b.WriteString("\n----- 끝 -----")
+	}
+	return b.String()
+}

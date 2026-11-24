@@ -18,6 +18,7 @@
   let running = $state<string[]>([])
   let logs = $state<Record<string, Log[]>>({})
   let error = $state('')
+  let draft = $state<{ projectId: number; text: string } | null>(null) // knowledge draft to review
   let tick = $state(0) // bumps when a request finishes so the detail reloads
 
   async function refresh() {
@@ -76,7 +77,7 @@
   }
 
   const cost = (c: number) => '$' + c.toFixed(3)
-  const modeName: Record<string, string> = { ask: '질문', plan: '기획', audit: '검토', meeting: '회의', solo: '혼자 개발', team: '팀', review: '팀 + QA' }
+  const modeName: Record<string, string> = { ask: '질문', plan: '기획', audit: '검토', meeting: '회의', learn: '프로젝트 파악', solo: '혼자 개발', team: '팀', review: '팀 + QA' }
   const short = (s: string) => (s.length > 60 ? s.slice(0, 60) + '…' : s)
 </script>
 
@@ -129,10 +130,11 @@
     {:else if selected === 'employees'}
       <Employees />
     {:else if selected === 'projects'}
-      <Projects onchanged={refresh} />
+      <Projects onchanged={refresh} onstarted={started} {draft} ondraftdone={() => (draft = null)} />
     {:else}
       {#key selected}
-        <RequestView id={selected} live={logs[selected] ?? []} isRunning={running.includes(selected)} {tick} onchanged={refresh} />
+        <RequestView id={selected} live={logs[selected] ?? []} isRunning={running.includes(selected)} {tick} onchanged={refresh}
+          onknowledge={(projectId, text) => { draft = { projectId, text }; selected = 'projects' }} />
       {/key}
     {/if}
   </main>
