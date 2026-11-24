@@ -10,6 +10,8 @@ import (
 	"time"
 
 	_ "modernc.org/sqlite"
+
+	"github.com/song-circle/devlog-kr/ai-office/internal/proc"
 )
 
 // Task states (원본 기획 4.2).
@@ -156,7 +158,7 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(schema + employeeSchema + projectSchema + messageSchema); err != nil {
+	if _, err := db.Exec(schema + employeeSchema + projectSchema + messageSchema + workspaceSchema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("schema: %w", err)
 	}
@@ -165,6 +167,9 @@ func Open(path string) (*Store, error) {
 		`ALTER TABLE runs ADD COLUMN agent TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE requests ADD COLUMN mode TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE requests ADD COLUMN project_id INTEGER NOT NULL DEFAULT 0`,
+		// The process running the request (proc.SelfToken), so another
+		// window or a command-line run does not mark it interrupted.
+		`ALTER TABLE requests ADD COLUMN owner TEXT NOT NULL DEFAULT ''`,
 	} {
 		if _, err := db.Exec(m); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			db.Close()
@@ -179,16 +184,38 @@ func (s *Store) Close() error { return s.db.Close() }
 // DB exposes the handle for reports and tests.
 func (s *Store) DB() *sql.DB { return s.db }
 
-// MarkInterrupted flags requests and tasks left running by an earlier process.
-// Returns how many requests were affected.
+// MarkInterrupted flags requests and tasks left running by a process that
+// has ended. Requests of processes still running (another window, a
+// command-line run) are left alone. Returns how many requests were affected.
 func (s *Store) MarkInterrupted() (int64, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return 0, err
 	}
 	defer tx.Rollback()
+	var dead []string
+	reqs, err := tx.Query(`SELECT id, owner FROM requests WHERE status = ?`, ReqRunning)
+	if err != nil {
+		return 0, err
+	}
+	for reqs.Next() {
+		var id, owner string
+		reqs.Scan(&id, &owner)
+		if !proc.Alive(owner) {
+			dead = append(dead, id)
+		}
+	}
+	reqs.Close()
+	if len(dead) == 0 {
+		return 0, nil
+	}
+	in := "?" + strings.Repeat(",?", len(dead)-1)
+	args := []any{ReqRunning, Assigned, InProgress, Review, Revision}
+	for _, id := range dead {
+		args = append(args, id)
+	}
 	rows, err := tx.Query(`SELECT t.id, t.status FROM tasks t JOIN requests r ON r.id = t.request_id
-		WHERE r.status = ? AND t.status IN (?, ?, ?, ?)`, ReqRunning, Assigned, InProgress, Review, Revision)
+		WHERE r.status = ? AND t.status IN (?, ?, ?, ?) AND r.id IN (`+in+`)`, args...)
 	if err != nil {
 		return 0, err
 	}
@@ -212,8 +239,11 @@ func (s *Store) MarkInterrupted() (int64, error) {
 			return 0, err
 		}
 	}
-	res, err := tx.Exec(`UPDATE requests SET status=?, reason=?, finished_at=? WHERE status=?`,
-		ReqInterrupted, "app ended while running", now(), ReqRunning)
+	args = []any{ReqInterrupted, "app ended while running", now(), ReqRunning}
+	for _, id := range dead {
+		args = append(args, id)
+	}
+	res, err := tx.Exec(`UPDATE requests SET status=?, reason=?, finished_at=? WHERE status=? AND id IN (`+in+`)`, args...)
 	if err != nil {
 		return 0, err
 	}
@@ -229,8 +259,9 @@ type Request struct {
 }
 
 func (s *Store) CreateRequest(r Request) error {
-	_, err := s.db.Exec(`INSERT INTO requests(id, text, repo, worktree, branch, base, status, config_json, created_at, mode, project_id)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?)`, r.ID, r.Text, r.Repo, r.Worktree, r.Branch, r.Base, ReqRunning, r.ConfigJSON, now(), r.Mode, r.ProjectID)
+	_, err := s.db.Exec(`INSERT INTO requests(id, text, repo, worktree, branch, base, status, config_json, created_at, mode, project_id, owner)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, r.ID, r.Text, r.Repo, r.Worktree, r.Branch, r.Base, ReqRunning, r.ConfigJSON, now(), r.Mode, r.ProjectID,
+		proc.SelfToken())
 	return err
 }
 

@@ -34,12 +34,19 @@ func TestLifecycleAndInterrupt(t *testing.T) {
 	}
 	s.Close()
 
-	// A new process finds the request still RUNNING: it was interrupted.
+	// Another window opening the database while this process still runs
+	// the request must leave it alone.
 	s, err = Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer s.Close()
+	if n, err := s.MarkInterrupted(); err != nil || n != 0 {
+		t.Fatalf("MarkInterrupted with a live owner = %d, %v", n, err)
+	}
+
+	// Once the owning process is gone, the request was interrupted.
+	s.DB().Exec(`UPDATE requests SET owner='4:0' WHERE id='r1'`) // pid 4 (System) with a wrong creation time
 	n, err := s.MarkInterrupted()
 	if err != nil || n != 1 {
 		t.Fatalf("MarkInterrupted = %d, %v", n, err)
@@ -105,5 +112,45 @@ func TestProjects(t *testing.T) {
 	s.DeleteProject(id)
 	if ps, _ := s.Projects(); len(ps) != 0 {
 		t.Errorf("deleted project listed: %+v", ps)
+	}
+}
+
+func TestWorkspaces(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "aio.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	a, _ := s.SaveProject(Project{Name: "web", Repo: `C:\work\web`})
+	b, _ := s.SaveProject(Project{Name: "api", Repo: `C:\work\api`})
+	if p, ok, _ := s.ProjectByRepo(`c:/WORK/web`); !ok || p.ID != a {
+		t.Errorf("ProjectByRepo = %v %v", p, ok)
+	}
+	one, _ := s.SaveWorkspace(Workspace{Name: "web", ProjectIDs: []int64{a}})
+	both, _ := s.SaveWorkspace(Workspace{Name: "shop", ProjectIDs: []int64{a, b}})
+	if id, _ := s.WorkspaceFor(a); id != one {
+		t.Errorf("WorkspaceFor = %d, want %d", id, one)
+	}
+	s.DeleteProject(b)
+	w, err := s.Workspace(both)
+	if err != nil || len(w.Projects) != 1 || w.Projects[0].Name != "web" {
+		t.Errorf("Workspace = %+v, %v", w, err)
+	}
+	s.TouchWorkspace(one)
+	rs, _ := s.RecentWorkspaces(10)
+	if len(rs) != 2 || rs[0].ID != one {
+		t.Errorf("recent = %+v", rs)
+	}
+	s.ForgetWorkspace(one)
+	if rs, _ := s.RecentWorkspaces(10); len(rs) != 1 {
+		t.Errorf("after forget = %d", len(rs))
+	}
+	// Requests are matched by folder: one from before projects existed
+	// (project 0) still shows, another folder's does not.
+	s.CreateRequest(Request{ID: "r-web", Text: "x", Repo: `C:\work\web`, Worktree: "x", Branch: "b", Base: "0", ProjectID: a})
+	s.CreateRequest(Request{ID: "r-old", Text: "x", Repo: `c:/Work/web`, Worktree: "x", Branch: "b1", Base: "0"})
+	s.CreateRequest(Request{ID: "r-other", Text: "x", Repo: `C:\work\other`, Worktree: "x", Branch: "b2", Base: "0", ProjectID: 99})
+	if rs, _ := s.ListRequestsIn([]string{`C:\work\web`}, 10); len(rs) != 2 {
+		t.Errorf("ListRequestsIn = %+v", rs)
 	}
 }

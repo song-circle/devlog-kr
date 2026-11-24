@@ -1,7 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { DeleteProject, PickFolder, Projects, SaveProject } from '../wailsjs/go/main/App'
+  import { AddFolder, Projects, RemoveFolder, SaveProject } from '../wailsjs/go/main/App'
   import type { store } from '../wailsjs/go/models'
+
+  let { onchanged }: { onchanged: () => void } = $props()
 
   let list = $state<store.Project[]>([])
   let editing = $state<any | null>(null)
@@ -16,19 +18,17 @@
   }
   onMount(load)
 
-  function edit(p?: store.Project) {
+  function edit(p: store.Project) {
     error = ''
-    editing = p
-      ? { ...p, checksText: (p.checks ?? []).join('\n'), protectText: (p.protect ?? []).join(', ') }
-      : { id: 0, name: '', repo: '', checksText: '', protectText: '', notes: '' }
+    editing = { ...p, checksText: (p.checks ?? []).join('\n'), protectText: (p.protect ?? []).join(', ') }
   }
 
-  async function pick() {
+  async function add() {
+    error = ''
     try {
-      const dir = await PickFolder()
-      if (dir) {
-        editing.repo = dir
-        if (!editing.name) editing.name = dir.split(/[\\/]/).pop()
+      if (await AddFolder()) {
+        await load()
+        onchanged()
       }
     } catch (e) {
       error = String(e)
@@ -44,24 +44,31 @@
       } as any)
       editing = null
       await load()
+      onchanged()
     } catch (e) {
       error = String(e)
     }
   }
 
   async function remove(p: store.Project) {
-    if (!confirm(`${p.name} 프로젝트를 목록에서 지울까요? 폴더와 파일은 그대로 둡니다.`)) return
-    await DeleteProject(p.id)
-    await load()
+    if (!confirm(`${p.name} 폴더를 이 작업공간에서 뺄까요? 폴더의 파일과 설정, 요청 기록은 그대로 둡니다.`)) return
+    error = ''
+    try {
+      await RemoveFolder(p.id)
+      await load()
+      onchanged()
+    } catch (e) {
+      error = String(e)
+    }
   }
 </script>
 
 <div class="top">
   <div>
-    <h1>프로젝트</h1>
-    <p class="hint">한 번 등록하면 요청할 때 프로젝트만 고르면 됩니다. <b>프로젝트 설명</b>(기술 스택, 지켜야 할 규칙, 배경)은 모든 직원의 지시에 자동으로 붙습니다.</p>
+    <h1>폴더 설정</h1>
+    <p class="hint">이 작업공간에 들어 있는 프로젝트 폴더입니다. 폴더마다 검사 명령, 고칠 수 없는 파일, <b>프로젝트 설명</b>(기술 스택, 지켜야 할 규칙, 배경)을 정합니다. 프로젝트 설명은 모든 직원의 지시에 자동으로 붙습니다.</p>
   </div>
-  <button class="primary" onclick={() => edit()}>+ 프로젝트 등록</button>
+  <button class="primary" onclick={add}>+ 폴더 추가</button>
 </div>
 {#if error}<p class="err">{error}</p>{/if}
 
@@ -70,14 +77,11 @@
     <div class="grid2">
       <div>
         <label for="pn">이름</label>
-        <input id="pn" bind:value={editing.name} placeholder="예: 가계부 앱" />
+        <input id="pn" bind:value={editing.name} />
       </div>
       <div>
-        <label for="pr">폴더 (git 저장소)</label>
-        <div class="pick">
-          <input id="pr" bind:value={editing.repo} placeholder="C:\path\to\repo" />
-          <button onclick={pick}>폴더 선택</button>
-        </div>
+        <span class="lbl">폴더 (git 저장소)</span>
+        <div class="mono path">{editing.repo}</div>
       </div>
     </div>
     <div class="grid2">
@@ -105,8 +109,8 @@
       <div class="row">
         <div><b class="name">{p.name}</b> <span class="mono muted">{p.repo}</span></div>
         <div class="btns">
-          <button onclick={() => edit(p)}>수정</button>
-          <button class="danger" onclick={() => remove(p)}>삭제</button>
+          <button onclick={() => edit(p)}>설정</button>
+          {#if list.length > 1}<button class="danger" onclick={() => remove(p)}>작업공간에서 빼기</button>{/if}
         </div>
       </div>
       <div class="meta">
@@ -115,8 +119,6 @@
       </div>
       {#if p.notes}<pre class="notes">{p.notes}</pre>{/if}
     </div>
-  {:else}
-    {#if !editing}<p class="muted">등록된 프로젝트가 없습니다. 오른쪽 위 버튼으로 등록하세요.</p>{/if}
   {/each}
 </div>
 
@@ -132,12 +134,12 @@
   .btns { display: flex; gap: 6px; }
   .name { font-size: 16px; margin-right: 8px; }
   .mono { font-family: var(--mono); font-size: 12px; }
+  .path { padding: 8px 0; }
+  .lbl { display: block; color: var(--muted); font-size: 12px; margin: 14px 0 6px; }
   .muted { color: var(--muted); }
   .meta { display: flex; gap: 24px; color: var(--muted); font-size: 12px; margin-top: 8px; }
   .notes { margin-top: 10px; color: var(--text); background: var(--panel2); border-radius: 6px; padding: 8px 10px; }
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-  .pick { display: flex; gap: 8px; }
-  .pick button { white-space: nowrap; }
   .actions { margin-top: 14px; display: flex; gap: 8px; }
   .err { color: var(--red); }
 </style>

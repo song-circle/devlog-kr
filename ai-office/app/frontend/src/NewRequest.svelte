@@ -88,9 +88,9 @@
 
 <h1>새 요청</h1>
 
-<span class="lbl">프로젝트 <button class="link" onclick={onprojects}>프로젝트 관리</button></span>
+<span class="lbl">프로젝트 <button class="link" onclick={onprojects}>폴더 설정</button></span>
 {#if projects.length === 0}
-  <div class="empty">먼저 프로젝트를 등록하세요. <button class="primary" onclick={onprojects}>프로젝트 등록</button></div>
+  <div class="empty">이 작업공간에 폴더가 없습니다. <button class="primary" onclick={onprojects}>폴더 추가</button></div>
 {:else}
   <select bind:value={projectId}>
     {#each projects as p}<option value={p.id}>{p.name} — {p.repo}</option>{/each}

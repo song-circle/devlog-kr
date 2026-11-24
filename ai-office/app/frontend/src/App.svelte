@@ -1,15 +1,18 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { List, Running } from '../wailsjs/go/main/App'
+  import { CloseWorkspace, Current, List, NewWindow, RenameWorkspace, Running } from '../wailsjs/go/main/App'
   import { EventsOn } from '../wailsjs/runtime/runtime'
   import type { store } from '../wailsjs/go/models'
   import NewRequest from './NewRequest.svelte'
   import RequestView from './RequestView.svelte'
   import Employees from './Employees.svelte'
   import Projects from './Projects.svelte'
+  import Welcome from './Welcome.svelte'
 
   type Log = { id: string; t: number; role: string; line: string }
 
+  let ws = $state<store.Workspace | null>(null)
+  let loaded = $state(false)
   let requests = $state<store.RequestRow[]>([])
   let selected = $state<string | null>(null) // null = new request form, 'employees' = employee screen
   let running = $state<string[]>([])
@@ -19,6 +22,8 @@
 
   async function refresh() {
     try {
+      ws = (await Current()) ?? null
+      loaded = true
       requests = (await List()) ?? []
       running = (await Running()) ?? []
     } catch (e) {
@@ -42,6 +47,28 @@
     }
   })
 
+  // A workspace was opened in this window (or closed): start fresh.
+  function switched() {
+    selected = null
+    refresh()
+  }
+
+  async function closeWs() {
+    await CloseWorkspace()
+    switched()
+  }
+
+  async function rename() {
+    const name = prompt('작업공간 이름', ws?.name ?? '')
+    if (!name) return
+    try {
+      await RenameWorkspace(name)
+      refresh()
+    } catch (e) {
+      error = String(e)
+    }
+  }
+
   function started(id: string) {
     logs[id] = []
     selected = id
@@ -53,12 +80,29 @@
   const short = (s: string) => (s.length > 60 ? s.slice(0, 60) + '…' : s)
 </script>
 
+{#if !loaded}
+  <div></div>
+{:else if !ws}
+  <main class="solo">
+    {#if error}<div class="err">{error}</div>{/if}
+    <Welcome onopened={switched} />
+  </main>
+{:else}
 <div class="layout">
   <aside>
-    <div class="brand">AI Office</div>
+    <div class="brand">
+      <button class="wsname" onclick={rename} title="이름 바꾸기">{ws.name}</button>
+      <div class="wsbtns">
+        <button class="small" onclick={() => NewWindow(0)} title="새 창">새 창</button>
+        <button class="small" onclick={closeWs} title="시작 화면으로">닫기</button>
+      </div>
+    </div>
+    <div class="folders">
+      {#each ws.projects as p (p.id)}<div class="folder" title={p.repo}>📁 {p.name}</div>{/each}
+    </div>
     <button class="primary new" onclick={() => (selected = null)}>+ 새 요청</button>
     <div class="navs">
-      <button class="nav" class:active={selected === 'projects'} onclick={() => (selected = 'projects')}>프로젝트</button>
+      <button class="nav" class:active={selected === 'projects'} onclick={() => (selected = 'projects')}>폴더 설정</button>
       <button class="nav" class:active={selected === 'employees'} onclick={() => (selected = 'employees')}>직원</button>
     </div>
     <div class="list">
@@ -85,7 +129,7 @@
     {:else if selected === 'employees'}
       <Employees />
     {:else if selected === 'projects'}
-      <Projects />
+      <Projects onchanged={refresh} />
     {:else}
       {#key selected}
         <RequestView id={selected} live={logs[selected] ?? []} isRunning={running.includes(selected)} {tick} onchanged={refresh} />
@@ -93,11 +137,18 @@
     {/if}
   </main>
 </div>
+{/if}
 
 <style>
   .layout { display: grid; grid-template-columns: 300px 1fr; height: 100%; }
   aside { background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
-  .brand { font-weight: 700; font-size: 18px; padding: 18px 16px 10px; color: var(--accent); }
+  .brand { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 14px 12px 6px; }
+  .wsname { background: transparent; border: none; padding: 2px 4px; font-weight: 700; font-size: 17px; color: var(--accent); text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .wsbtns { display: flex; gap: 4px; }
+  .small { padding: 3px 8px; font-size: 12px; }
+  .folders { padding: 0 16px 10px; }
+  .folder { font-size: 12px; color: var(--muted); padding: 2px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .solo { height: 100%; }
   .new { margin: 0 12px 8px; }
   .navs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 0 12px 12px; }
   .nav { background: transparent; }

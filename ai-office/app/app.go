@@ -30,6 +30,7 @@ type App struct {
 	initErr error
 
 	mu      sync.Mutex
+	wsID    int64 // workspace open in this window (0 = start screen)
 	running map[string]context.CancelFunc
 	logins  map[int64]*claudecode.Login
 }
@@ -56,6 +57,8 @@ func (a *App) startup(ctx context.Context) {
 		a.initErr = err
 	}
 	a.migrateLastProject()
+	a.migrateWorkspaces()
+	a.setWorkspace(workspaceArg(os.Args[1:]))
 }
 
 func (a *App) shutdown(ctx context.Context) {
@@ -84,33 +87,27 @@ func (a *App) ready() error {
 
 // ---- projects ----
 
-// Projects lists registered projects.
+// Projects lists the folders of this window's workspace.
 func (a *App) Projects() ([]store.Project, error) {
-	if err := a.ready(); err != nil {
-		return nil, err
+	w, err := a.Current()
+	if err != nil || w == nil {
+		return []store.Project{}, err
 	}
-	return a.st.Projects()
+	return w.Projects, nil
 }
 
-// SaveProject registers or updates a project; its folder must be a git repository.
+// SaveProject updates the settings of a folder in this workspace (folders
+// are added with AddFolder; the folder itself cannot change).
 func (a *App) SaveProject(p store.Project) (int64, error) {
 	if err := a.ready(); err != nil {
 		return 0, err
 	}
-	top, err := workspace.TopLevel(p.Repo)
-	if err != nil {
-		return 0, fmt.Errorf("git 저장소가 아닙니다: %s", p.Repo)
+	old, err := a.st.Project(p.ID)
+	if err != nil || !a.inWorkspace(p.ID) {
+		return 0, errors.New("이 작업공간의 폴더가 아닙니다")
 	}
-	p.Repo = top
+	p.Repo = old.Repo
 	return a.st.SaveProject(p)
-}
-
-// DeleteProject removes a project from the list (its folder is not touched).
-func (a *App) DeleteProject(id int64) error {
-	if err := a.ready(); err != nil {
-		return err
-	}
-	return a.st.DeleteProject(id)
 }
 
 // migrateLastProject turns the form values saved by earlier versions into
@@ -135,17 +132,20 @@ func (a *App) migrateLastProject() {
 	a.st.SaveProject(store.Project{Name: filepath.Base(old.Repo), Repo: old.Repo, Checks: old.Checks, Protect: old.Protect})
 }
 
-// PickFolder opens a folder dialog and returns the git repository root.
-func (a *App) PickFolder() (string, error) {
-	dir, err := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{Title: "프로젝트 폴더"})
-	if err != nil || dir == "" {
-		return "", err
+// migrateWorkspaces gives every project registered before workspaces
+// existed a workspace of its own, once, so it shows on the start screen.
+func (a *App) migrateWorkspaces() {
+	if ws, err := a.st.RecentWorkspaces(1); err != nil || len(ws) > 0 {
+		return
 	}
-	top, err := workspace.TopLevel(dir)
-	if err != nil {
-		return "", fmt.Errorf("git 저장소가 아닙니다: %s", dir)
+	if done, _ := a.st.Setting("workspaces_migrated"); done != "" {
+		return
 	}
-	return top, nil
+	ps, _ := a.st.Projects()
+	for _, p := range ps {
+		a.st.SaveWorkspace(store.Workspace{Name: p.Name, ProjectIDs: []int64{p.ID}})
+	}
+	a.st.SetSetting("workspaces_migrated", "1")
 }
 
 // ---- requests ----
@@ -203,7 +203,7 @@ func (a *App) Start(in StartInput) (string, error) {
 		return "", errors.New("요청 내용을 적어 주세요")
 	}
 	proj, err := a.st.Project(in.ProjectID)
-	if err != nil {
+	if err != nil || !a.inWorkspace(proj.ID) {
 		return "", errors.New("프로젝트를 골라 주세요")
 	}
 	top, err := workspace.TopLevel(proj.Repo)
@@ -349,7 +349,15 @@ func (a *App) List() ([]store.RequestRow, error) {
 	if err := a.ready(); err != nil {
 		return nil, err
 	}
-	return a.st.ListRequests(200)
+	w, err := a.Current()
+	if err != nil || w == nil {
+		return []store.RequestRow{}, err
+	}
+	repos := []string{}
+	for _, p := range w.Projects {
+		repos = append(repos, p.Repo)
+	}
+	return a.st.ListRequestsIn(repos, 200)
 }
 
 // Detail is everything the request screen shows.

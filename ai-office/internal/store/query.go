@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -53,6 +54,36 @@ func (s *Store) ListRequests(limit int) ([]RequestRow, error) {
 	}
 	defer rows.Close()
 	out := []RequestRow{} // never null in JSON
+	for rows.Next() {
+		r, err := scanRequest(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// ListRequestsIn returns the newest requests made on the given repository
+// folders. Matching by folder rather than project id keeps requests made
+// before projects existed, or under a project registered again.
+func (s *Store) ListRequestsIn(repos []string, limit int) ([]RequestRow, error) {
+	out := []RequestRow{}
+	if len(repos) == 0 {
+		return out, nil
+	}
+	args := []any{}
+	for _, r := range repos {
+		args = append(args, pathKey(r))
+	}
+	args = append(args, limit)
+	rows, err := s.db.Query(`SELECT `+requestCols+` FROM requests r LEFT JOIN runs u ON u.request_id = r.id
+		WHERE lower(replace(r.repo, '/', '\')) IN (?`+strings.Repeat(",?", len(repos)-1)+`)
+		GROUP BY r.id ORDER BY r.created_at DESC LIMIT ?`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
 	for rows.Next() {
 		r, err := scanRequest(rows)
 		if err != nil {
