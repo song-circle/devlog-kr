@@ -58,7 +58,10 @@ type Config struct {
 	// project folder, then the setup commands run (SetupTimeout each).
 	// BaseRef is where code-changing work starts (e.g. "origin/dev", the
 	// shared branch it will be deployed to); empty = the project folder's HEAD.
-	BaseRef      string        `json:"base_ref,omitempty"`
+	BaseRef string `json:"base_ref,omitempty"`
+	// Requester is who asked (their git user name); it goes into the work
+	// commit so others see whose change it is.
+	Requester    string        `json:"requester,omitempty"`
 	CopyFiles    []string      `json:"copy_files,omitempty"`
 	Setup        []string      `json:"setup,omitempty"`
 	SetupTimeout time.Duration `json:"setup_timeout,omitempty"`
@@ -233,7 +236,16 @@ func (p *Prepared) Execute(ctx context.Context) (*Outcome, error) {
 		status, reason = store.ReqCancelled, "stopped by user"
 	}
 	if status == store.ReqDone && !ReadOnly(r.cfg.Mode) {
-		if err := r.commit(); err != nil {
+		// Checks pass on unchanged code too: a developer that stopped to ask
+		// a question (or did nothing) must not look like finished work
+		// (bug 017).
+		if changes, err := workspace.Status(wt.Dir); err == nil && len(changes) == 0 {
+			status, reason = store.ReqNoChange, "AI가 파일을 하나도 바꾸지 않았습니다."
+			if last := o.Store.LastResult(id, "dev"); last != "" {
+				reason += " AI의 마지막 답: " + oneLine(last, 600)
+			}
+			o.log("system", "no files changed: nothing to deploy")
+		} else if err := r.commit(); err != nil {
 			status, reason = store.ReqFailed, "commit: "+err.Error()
 		}
 	}
@@ -753,7 +765,7 @@ func (r *run) commit() error {
 	if err != nil || len(changes) == 0 {
 		return err
 	}
-	return r.wt.Commit("AI Office: " + oneLine(r.cfg.Request, 60))
+	return r.wt.Commit(workMessage(r.id, r.cfg.Requester, r.cfg.Mode, r.cfg.Request))
 }
 
 func rel(dir, p string) string {

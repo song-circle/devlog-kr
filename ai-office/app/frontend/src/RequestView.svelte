@@ -110,7 +110,7 @@
           <button class="ok" disabled={busy} onclick={() => act(Approve, `이 변경을 원래 저장소에 반영(merge)할까요?\n${r.repo}`)}>승인하고 반영</button>
         {/if}
         <button disabled={busy} onclick={() => act(Discard, '작업 폴더와 브랜치를 지울까요?')}>폐기</button>
-      {:else if r.status === 'FAILED' || r.status === 'CANCELLED' || r.status === 'INTERRUPTED'}
+      {:else if r.status === 'FAILED' || r.status === 'CANCELLED' || r.status === 'INTERRUPTED' || r.status === 'NO_CHANGE'}
         <button disabled={busy} onclick={() => act(Discard, '작업 폴더와 브랜치를 지울까요?')}>폐기</button>
       {/if}
     </div>

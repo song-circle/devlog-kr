@@ -27,11 +27,39 @@ export namespace claudecode {
 
 export namespace main {
 	
+	export class BoardItem {
+	    id: string;
+	    text: string;
+	    who: string;
+	    when: string;
+	    costUsd: number;
+	    reason: string;
+	    local: boolean;
+	    commit: string;
+	    deployedBy: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new BoardItem(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.text = source["text"];
+	        this.who = source["who"];
+	        this.when = source["when"];
+	        this.costUsd = source["costUsd"];
+	        this.reason = source["reason"];
+	        this.local = source["local"];
+	        this.commit = source["commit"];
+	        this.deployedBy = source["deployedBy"];
+	    }
+	}
 	export class Column {
 	    key: string;
 	    title: string;
 	    hint: string;
-	    items: store.RequestRow[];
+	    items: BoardItem[];
 	
 	    static createFrom(source: any = {}) {
 	        return new Column(source);
@@ -42,7 +70,7 @@ export namespace main {
 	        this.key = source["key"];
 	        this.title = source["title"];
 	        this.hint = source["hint"];
-	        this.items = this.convertValues(source["items"], store.RequestRow);
+	        this.items = this.convertValues(source["items"], BoardItem);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -185,6 +213,7 @@ export namespace main {
 	    dev: string;
 	    prod: string;
 	    fetchErr: string;
+	    me: string;
 	    prodTime: string;
 	    devAhead: number;
 	    localBranch: string;
@@ -206,6 +235,7 @@ export namespace main {
 	        this.dev = source["dev"];
 	        this.prod = source["prod"];
 	        this.fetchErr = source["fetchErr"];
+	        this.me = source["me"];
 	        this.prodTime = source["prodTime"];
 	        this.devAhead = source["devAhead"];
 	        this.localBranch = source["localBranch"];

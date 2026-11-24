@@ -131,3 +131,40 @@ func TestDeployStopsOnConflictOrFailedCheck(t *testing.T) {
 		t.Errorf("dev moved after failures")
 	}
 }
+
+// Whose request a change was travels with the commits: a colleague who
+// fetches dev finds the request id, the requester and who deployed it.
+func TestRequestInfoInCommits(t *testing.T) {
+	origin, project, colleague := shared(t)
+	data := t.TempDir()
+	st, _ := store.Open(filepath.Join(data, "aio.db"))
+	defer st.Close()
+	workspace.Fetch(project, "origin", "dev")
+	wt, _ := workspace.CreateFrom(project, filepath.Join(data, "worktrees"), "20261124-120000-001", "origin/dev")
+	write(t, wt.Dir, "x.txt", "x\n")
+	if err := wt.Commit(workMessage("20261124-120000-001", "김민지", ModeSolo, "주문 목록에 엑셀 버튼을 추가해 줘.\n파일 이름은 날짜로.")); err != nil {
+		t.Fatal(err)
+	}
+	// Someone else deployed first, so the deploy makes a merge commit too.
+	write(t, colleague, "y.txt", "y\n")
+	gitT(t, colleague, "add", "-A")
+	gitT(t, colleague, "commit", "-qm", "other")
+	gitT(t, colleague, "push", "-q", "origin", "dev")
+	o := &Orchestrator{Store: st, DataDir: data}
+	if _, err := o.DeployTo(context.Background(), Deploy{RequestID: "20261124-120000-001", Worktree: wt, Remote: "origin", Target: "dev", Deployer: "박팀장"}); err != nil {
+		t.Fatal(err)
+	}
+	_ = origin
+	gitT(t, colleague, "fetch", "-q")
+	cs, err := workspace.RequestCommits(colleague, "origin/dev", 50, TrailerRequest, TrailerRequester, TrailerDeployedBy)
+	if err != nil || len(cs) != 2 {
+		t.Fatalf("commits %+v, %v", cs, err)
+	}
+	merge, work := cs[0], cs[1]
+	if merge.Request != "20261124-120000-001" || merge.DeployedBy != "박팀장" || merge.Requester != "" {
+		t.Errorf("merge commit %+v", merge)
+	}
+	if work.Request != "20261124-120000-001" || work.Requester != "김민지" || !strings.Contains(work.Body, "파일 이름은 날짜로.") {
+		t.Errorf("work commit %+v", work)
+	}
+}

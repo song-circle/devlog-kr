@@ -383,3 +383,25 @@ func TestPrepareFailures(t *testing.T) {
 		})
 	}
 }
+
+// Bug 017: the developer stopped to ask a question and changed nothing.
+// The checks pass on the unchanged code, but that is not finished work.
+func TestNoChangeIsNotDone(t *testing.T) {
+	repo := newRepo(t)
+	data := t.TempDir()
+	st, _ := store.Open(filepath.Join(data, "aio.db"))
+	defer st.Close()
+	fe := &fakeEngine{t: t, dev: []func(string){func(string) {}}}
+	o := &Orchestrator{Engine: fe, Store: st, DataDir: data}
+	out, err := o.Run(context.Background(), Config{Repo: repo, Request: "필드를 추가해", Mode: ModeSolo, BudgetUSD: 1,
+		Checks: []string{"exit 0"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Status != store.ReqNoChange || !strings.Contains(out.Reason, "did it") {
+		t.Errorf("status %s reason %q", out.Status, out.Reason)
+	}
+	if head, _ := exec.Command("git", "-C", out.Worktree.Dir, "rev-parse", "HEAD").Output(); strings.TrimSpace(string(head)) != out.Worktree.Base {
+		t.Errorf("a commit was made")
+	}
+}

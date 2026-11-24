@@ -57,7 +57,7 @@ func (a *App) deployDev(r store.RequestRow, p store.Project) error {
 	work := wt.Head()
 	head, err := o.DeployTo(ctx, orchestrator.Deploy{
 		RequestID: r.ID, Worktree: wt, Remote: remote, Target: p.DevBranch,
-		Setup: p.Setup, Checks: p.Checks, Timeout: 15 * time.Minute,
+		Setup: p.Setup, Checks: p.Checks, Timeout: 15 * time.Minute, Deployer: requesterName(p.Repo),
 	})
 	if err != nil {
 		return err

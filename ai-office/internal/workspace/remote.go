@@ -42,10 +42,10 @@ var ErrConflict = errors.New("conflict")
 // branch so the request sits on top of what others have merged meanwhile.
 // On a conflict the merge is aborted and ErrConflict returned with the
 // conflicting paths. Returns whether anything new came in.
-func (w *Worktree) MergeLatest(ref string) (bool, error) {
+func (w *Worktree) MergeLatest(ref, message string) (bool, error) {
 	before, _ := git(w.Dir, "rev-parse", "HEAD")
 	if _, err := git(w.Dir, "-c", "user.name=AI Office", "-c", "user.email=ai-office@localhost",
-		"merge", "--no-edit", "-m", "AI Office: 최신 "+ref+" 반영", ref); err != nil {
+		"merge", "--no-edit", "-m", message, ref); err != nil {
 		files, _ := git(w.Dir, "diff", "--name-only", "--diff-filter=U")
 		git(w.Dir, "merge", "--abort")
 		if f := strings.Fields(files); len(f) > 0 {

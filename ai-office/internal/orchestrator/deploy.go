@@ -28,6 +28,7 @@ type Deploy struct {
 	Checks    []string
 	Timeout   time.Duration // per setup / check command
 	Attempts  int           // pushes tried when the branch keeps moving (default 3)
+	Deployer  string        // who deploys (recorded in the merge commit)
 }
 
 // DeployTo runs a Deploy and returns the commit now at the top of the target.
@@ -49,7 +50,7 @@ func (o *Orchestrator) DeployTo(ctx context.Context, d Deploy) (string, error) {
 		if err := workspace.Fetch(wt.Repo, d.Remote, d.Target); err != nil {
 			return "", fmt.Errorf("%s 를 가져오지 못했습니다: %w", ref, err)
 		}
-		changed, err := wt.MergeLatest(ref)
+		changed, err := wt.MergeLatest(ref, mergeMessage(ref, d.RequestID, d.Deployer))
 		if errors.Is(err, workspace.ErrConflict) {
 			return "", fmt.Errorf("다른 사람이 %s 에 먼저 반영한 변경과 충돌합니다(%v). 이 요청은 폐기하고 최신 상태에서 다시 요청하세요", d.Target, err)
 		}

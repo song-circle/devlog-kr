@@ -121,7 +121,7 @@
 
   // Requests by id, for the graph's links and branch labels.
   let byId = $derived.by(() => {
-    const m: Record<string, store.RequestRow> = {}
+    const m: Record<string, main.BoardItem> = {}
     for (const col of ov?.columns ?? []) for (const r of col.items ?? []) m[r.id] = r
     return m
   })
@@ -180,9 +180,14 @@
         <div class="colhead"><b>{col.title}</b> <span class="count">{col.items.length}</span></div>
         <div class="hint">{col.hint}</div>
         {#each col.items as r (r.id)}
-          <button class="card c-{col.key}" onclick={() => onopen(r.id)}>
+          <button class="card c-{col.key}" class:other={!r.local} disabled={!r.local} onclick={() => onopen(r.id)}
+            title={r.local ? '요청 화면 열기' : '다른 PC에서 만든 요청입니다(GitHub 이력에서 읽음)'}>
             <div class="text">{short(r.text, 70)}</div>
-            <div class="meta">{col.key === 'running' ? ago(r.createdAt) + ' 시작' : when(r.finishedAt || r.createdAt)} · ${r.costUsd.toFixed(2)}</div>
+            <div class="meta">
+              <span class="who2" class:me={r.who === ov.me && r.local}>{r.who || '알 수 없음'}</span>
+              · {col.key === 'running' ? ago(r.when) + ' 시작' : when(r.when)}{r.local ? ` · $${r.costUsd.toFixed(2)}` : ''}
+            </div>
+            {#if r.deployedBy && r.deployedBy !== r.who}<div class="meta">반영: {r.deployedBy}</div>{/if}
             {#if col.key === 'stopped' && r.reason}<div class="why">{short(r.reason, 60)}</div>{/if}
           </button>
         {:else}
@@ -211,7 +216,9 @@
         {@const req = ov.commitRequest[row.c.hash]}
         <div class="row" style="height: {H}px">
           {#each row.c.refs as ref}<span class="ref r-{refClass(ref)}">{refName(ref)}</span>{/each}
-          {#if req}
+          {#if req && byId[req] && !byId[req].local}
+            <span class="subj" title="다른 PC의 요청">{short(row.c.subject.replace(/^AI Office: /, '🤖 '), 50)} <span class="who2">{byId[req].who}</span></span>
+          {:else if req}
             <button class="link" onclick={() => onopen(req)} title="요청 화면 열기">{short(row.c.subject.replace(/^AI Office: /, '🤖 '), 60)}</button>
           {:else}
             <span class="subj">{short(row.c.subject, 60)}</span>
@@ -251,6 +258,10 @@
   .c-dev { border-left-color: #58a6ff; }
   .c-prod, .c-merged { border-left-color: #ff7b72; }
   .c-stopped { border-left-color: var(--muted); opacity: .8; }
+  .card.other { cursor: default; opacity: 1; }
+  .card:disabled { opacity: 1; }
+  .who2 { color: var(--text); font-family: inherit; }
+  .who2.me { color: var(--accent); }
   .text { line-height: 1.35; font-size: 13px; }
   .meta { color: var(--muted); font-size: 11px; margin-top: 4px; font-family: var(--mono); }
   .why { color: var(--red); font-size: 11px; margin-top: 3px; }

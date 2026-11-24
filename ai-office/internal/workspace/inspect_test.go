@@ -23,6 +23,7 @@ func TestLogAndCounts(t *testing.T) {
 	if !IsAncestor(repo, a, main) || IsAncestor(repo, Resolve(repo, main), "dev") {
 		t.Errorf("IsAncestor wrong")
 	}
+	run(t, repo, "git", "branch", "noise", "dev") // not asked for: must not label commits
 	log, err := Log(repo, 10, []string{main, "dev", "no-such-branch"})
 	if err != nil || len(log) != 3 {
 		t.Fatalf("log %d, %v", len(log), err)

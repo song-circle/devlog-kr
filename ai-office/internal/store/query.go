@@ -12,6 +12,7 @@ const (
 	ReqApproved  = "APPROVED"  // merged into the user's branch
 	ReqDiscarded = "DISCARDED" // worktree and branch removed
 	ReqDev       = "DEV"       // pushed to the shared development branch
+	ReqNoChange  = "NO_CHANGE" // a code request ended without changing any file
 )
 
 // RequestRow is a request with its totals, for lists.
@@ -106,6 +107,13 @@ func (s *Store) GetRequest(id string) (RequestRow, error) {
 func (s *Store) SetDeployed(id, reason, workCommit string) error {
 	_, err := s.db.Exec(`UPDATE requests SET status=?, reason=?, work_commit=? WHERE id=?`, ReqDev, reason, workCommit, id)
 	return err
+}
+
+// LastResult is the final text of the last run of role in a request.
+func (s *Store) LastResult(reqID, role string) string {
+	var t string
+	s.db.QueryRow(`SELECT result_text FROM runs WHERE request_id=? AND role=? ORDER BY id DESC LIMIT 1`, reqID, role).Scan(&t)
+	return t
 }
 
 // WorkCommit is the commit a deployed request made ("" if not deployed).

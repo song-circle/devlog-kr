@@ -69,6 +69,7 @@ type Commit struct {
 
 // Log lists up to n commits reachable from refs, children before parents
 // (the order a graph is drawn in). Refs that do not exist are skipped.
+// Only the given refs label commits (other branches would be noise).
 func Log(repo string, n int, refs []string) ([]Commit, error) {
 	var have []string
 	for _, r := range refs {
@@ -79,8 +80,20 @@ func Log(repo string, n int, refs []string) ([]Commit, error) {
 	if len(have) == 0 {
 		return []Commit{}, nil
 	}
-	args := append([]string{"log", "--topo-order", "--decorate=short", "-n", strconv.Itoa(n),
-		"--format=%H%x1f%P%x1f%s%x1f%an%x1f%cI%x1f%D%x1e"}, have...)
+	args := []string{"log", "--topo-order", "--decorate=short", "-n", strconv.Itoa(n),
+		"--format=%H%x1f%P%x1f%s%x1f%an%x1f%cI%x1f%D%x1e"}
+	for _, r := range have {
+		full := r
+		if r == "HEAD" {
+			if b := CurrentBranch(repo); b != "" {
+				full = "refs/heads/" + b
+			}
+		} else if out, err := git(repo, "rev-parse", "--symbolic-full-name", r); err == nil && strings.TrimSpace(out) != "" {
+			full = strings.TrimSpace(out)
+		}
+		args = append(args, "--decorate-refs="+full)
+	}
+	args = append(args, have...)
 	out, err := git(repo, args...)
 	if err != nil {
 		return nil, err
@@ -102,4 +115,51 @@ func Log(repo string, n int, refs []string) ([]Commit, error) {
 		commits = append(commits, c)
 	}
 	return commits, nil
+}
+
+// TrailerCommit is a commit carrying AI Office request trailers.
+type TrailerCommit struct {
+	Hash       string
+	Date       string // RFC 3339
+	Subject    string
+	Body       string
+	Request    string // request id
+	Requester  string
+	DeployedBy string
+}
+
+// RequestCommits finds commits reachable from ref (up to n, newest first)
+// that name a request in their trailers.
+func RequestCommits(repo, ref string, n int, keyRequest, keyRequester, keyDeployed string) ([]TrailerCommit, error) {
+	if !RefExists(repo, ref) {
+		return nil, nil
+	}
+	tr := func(k string) string { return "%(trailers:key=" + k + ",valueonly,separator=%x2C)" }
+	out, err := git(repo, "log", "-n", strconv.Itoa(n),
+		"--format=%H%x1f%cI%x1f%s%x1f%b%x1f"+tr(keyRequest)+"%x1f"+tr(keyRequester)+"%x1f"+tr(keyDeployed)+"%x1e", ref)
+	if err != nil {
+		return nil, err
+	}
+	var cs []TrailerCommit
+	for _, rec := range strings.Split(out, "\x1e") {
+		f := strings.Split(strings.TrimLeft(rec, "\r\n"), "\x1f")
+		if len(f) < 7 {
+			continue
+		}
+		c := TrailerCommit{Hash: f[0], Date: f[1], Subject: f[2], Body: f[3],
+			Request: strings.TrimSpace(f[4]), Requester: strings.TrimSpace(f[5]), DeployedBy: strings.TrimSpace(f[6])}
+		if c.Request != "" {
+			cs = append(cs, c)
+		}
+	}
+	return cs, nil
+}
+
+// ConfigValue reads a git setting as seen from repo ("" if unset).
+func ConfigValue(repo, key string) string {
+	out, err := git(repo, "config", "--get", key)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
 }

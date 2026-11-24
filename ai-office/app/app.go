@@ -303,7 +303,7 @@ func (a *App) Start(in StartInput) (string, error) {
 		ID: id, Repo: top, Request: in.Request, Checks: proj.Checks, Protect: append(proj.Protect, knowledge.RelPath), // the document changes only through review
 		PMModel: "sonnet", DevModel: "sonnet", Agents: agents, MaxFixRounds: in.FixRounds, BudgetUSD: in.BudgetUSD,
 		TaskTimeout: 15 * time.Minute, CheckTimeout: 5 * time.Minute,
-		BaseRef: baseRef, CopyFiles: proj.CopyFiles, Setup: proj.Setup, SetupTimeout: 15 * time.Minute,
+		BaseRef: baseRef, Requester: requesterName(top), CopyFiles: proj.CopyFiles, Setup: proj.Setup, SetupTimeout: 15 * time.Minute,
 		Mode: in.Mode, ProjectID: proj.ID, ProjectNotes: proj.Notes, Knowledge: doc, Panels: panels, MeetingRounds: in.Rounds,
 	}
 	// Create the worktree and the database row now, so the request exists
@@ -444,7 +444,7 @@ func (a *App) Detail(id string) (*Detail, error) {
 		if work := a.st.WorkCommit(id); work != "" {
 			d.Diff, _ = workspace.DiffBranch(r.Repo, r.Base, work)
 		}
-	case store.ReqRunning, store.ReqFailed, store.ReqCancelled, store.ReqInterrupted:
+	case store.ReqRunning, store.ReqFailed, store.ReqCancelled, store.ReqInterrupted, store.ReqNoChange:
 		if _, err := os.Stat(r.Worktree); err == nil {
 			d.Diff, _ = workspace.Open(r.Repo, r.Worktree, r.Branch, r.Base).Diff()
 		}
@@ -471,6 +471,11 @@ func (a *App) Approve(id string) error {
 	}
 	if r.Status != store.ReqDone {
 		return fmt.Errorf("검증을 통과한 요청만 반영할 수 있습니다 (현재 %s)", r.Status)
+	}
+	// A branch still at its base has no work of its own: deploying it would
+	// push nothing and record someone else's commit as this request's.
+	if head := workspace.Resolve(r.Repo, r.Branch); head == "" || head == r.Base {
+		return errors.New("이 요청에는 반영할 변경(커밋)이 없습니다")
 	}
 	if p, target := a.deployTarget(r.ProjectID); target != "" {
 		return a.deployDev(r, p)
