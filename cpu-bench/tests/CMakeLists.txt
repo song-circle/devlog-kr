@@ -35,6 +35,10 @@ add_test(NAME runner_mt_falseshare COMMAND cpu-bench-runner run mt --workload fa
 add_test(NAME runner_mt_queue COMMAND cpu-bench-runner run mt --workload queue --mt --duration-ms 200 --runs 2 --json)
 add_test(NAME runner_mt_queue_st COMMAND cpu-bench-runner run mt --workload queue --duration-ms 200 --runs 2)
 
+# 확장 곡선(scale): 스레드 1→N
+add_test(NAME runner_scale_int COMMAND cpu-bench-runner scale int --to 3 --duration-ms 100 --runs 1)
+add_test(NAME runner_scale_mt_json COMMAND cpu-bench-runner scale mt --workload falseshare --to 4 --duration-ms 100 --runs 1 --json)
+
 # SMBIOS 메모리 정보 해석 (직접 만든 표로 확인)
 add_executable(smbios_test smbios_test.cpp ${CMAKE_SOURCE_DIR}/runner/smbios.cpp)
 target_include_directories(smbios_test PRIVATE ${CMAKE_SOURCE_DIR}/runner)

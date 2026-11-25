@@ -97,6 +97,8 @@ int usage() {
                  "                       [--duration-ms N] [--runs N] [--seed N] [--no-pin] [--json]\n"
                  "  cpu-bench-runner sweep <module id | dll path> [--workload W] [--from N] [--to N]\n"
                  "                       [--threads N | --mt] [--duration-ms N] [--runs N] [--seed N] [--no-pin] [--json]\n"
+                 "  cpu-bench-runner scale <module id | dll path> [--workload W] [--size N] [--to N]\n"
+                 "                       [--duration-ms N] [--runs N] [--seed N] [--no-pin] [--json]\n"
                  "sizes accept K/M/G suffixes (binary): 16K, 256M, 1G\n");
     return 2;
 }
@@ -532,12 +534,13 @@ struct Options {
     uint32_t threads = 1, duration_ms = 2000, runs = 5;
     uint64_t seed = 1;
     bool mt_all = false, pin = true, json = false;
+    uint32_t max_threads = 0;  // scale: 0이면 논리 CPU 수
 };
 
-bool parse_options(int argc, wchar_t** argv, bool sweep, Options& o) {
+bool parse_options(int argc, wchar_t** argv, bool sweep, Options& o, bool scale = false) {
     if (argc < 3) return false;
     o.module = argv[2];
-    if (sweep) {
+    if (sweep || scale) {
         o.duration_ms = 500;
         o.runs = 3;
     }
@@ -552,8 +555,11 @@ bool parse_options(int argc, wchar_t** argv, bool sweep, Options& o) {
         };
         auto next_size = [&](uint64_t& v) { return has_value && parse_size(argv[++i], v); };
         uint64_t v = 0;
-        if (a == L"--threads" && next_u64(v) && v > 0 && v <= 4096) o.threads = uint32_t(v);
-        else if (a == L"--mt") o.mt_all = true;
+        if (scale && a == L"--to") {
+            if (!next_u64(v) || v == 0 || v > 4096) return false;
+            o.max_threads = uint32_t(v);
+        } else if (!scale && a == L"--threads" && next_u64(v) && v > 0 && v <= 4096) o.threads = uint32_t(v);
+        else if (!scale && a == L"--mt") o.mt_all = true;
         else if (a == L"--duration-ms" && next_u64(v) && v > 0 && v <= 3600000) o.duration_ms = uint32_t(v);
         else if (a == L"--runs" && next_u64(v) && v > 0 && v <= 1000) o.runs = uint32_t(v);
         else if (a == L"--seed" && next_u64(v)) o.seed = v;
@@ -900,6 +906,90 @@ int cmd_sweep(int argc, wchar_t** argv) {
     return all_ok ? 0 : 3;
 }
 
+// ---------------------------------------------------------------- scale
+
+// 확장 곡선: 같은 측정을 스레드 1개부터 N개(기본: 논리 CPU 수)까지 늘려 가며 반복한다.
+// 스레드는 run --mt와 같은 순서로 코어에 고정된다(성능 코어 → 효율 코어 → SMT 형제).
+// 표의 "Added"는 그 줄에서 새로 붙은 스레드가 앉은 코어 종류다.
+int cmd_scale(int argc, wchar_t** argv) {
+    Options o;
+    if (!parse_options(argc, argv, false, o, true)) return usage();
+    Session s;
+    if (!open_session(o, s)) return 1;
+    const BenchInfo* info = s.mod.info;
+    const uint32_t max_t = o.max_threads ? o.max_threads : uint32_t(s.topo.cpus.size());
+
+    auto added_core = [&](uint32_t t) -> std::string {
+        if (!o.pin || s.plan.order.empty()) return "-";
+        const LogicalCpu& c = s.plan.order[(t - 1) % s.plan.order.size()];
+        std::string k = !s.topo.hybrid ? "core" : (c.efficiency == s.topo.max_efficiency ? "P" : "E");
+        if (!c.first_in_core) k += "-SMT";
+        if (t > s.plan.order.size()) k += "+";  // 논리 CPU보다 스레드가 많음(같은 CPU를 나눠 씀)
+        return k;
+    };
+
+    if (o.json) {
+        std::printf("{\"module\":%s,\"module_version\":%s,\"workload\":%s,\"cpu\":%s,\"hybrid\":%s,\"pinned\":%s,"
+                    "\"duration_ms\":%u,\"runs\":%u,\"seed\":%llu,\"points\":[",
+                    json_str(info->id).c_str(), json_str(info->version).c_str(), json_str(s.workload).c_str(),
+                    json_str(s.topo.brand).c_str(), s.topo.hybrid ? "true" : "false", o.pin ? "true" : "false",
+                    o.duration_ms, o.runs, static_cast<unsigned long long>(o.seed));
+    } else {
+        std::printf("Module   : %s %s\n", info->name, info->version);
+        std::printf("CPU      : %s (%zu logical, %u cores%s)\n", s.topo.brand.c_str(), s.topo.cpus.size(),
+                    s.topo.cores, s.topo.hybrid ? ", hybrid" : "");
+        if (!s.workload.empty()) std::printf("Workload : %s\n", s.workload.c_str());
+        std::printf("Threads  : 1 to %u%s, %u ms x %u runs each (+1 warm-up), seed %llu\n", max_t,
+                    o.pin ? ", pinned P -> E -> SMT" : "", o.duration_ms, o.runs,
+                    static_cast<unsigned long long>(o.seed));
+    }
+
+    bool all_ok = true;
+    double base = 0;
+    for (uint32_t t = 1; t <= max_t; ++t) {
+        s.cfg.threads = t;
+        Measurement m;
+        int32_t rc = measure(s.mod, s.cfg, o.runs, m, [](uint32_t, const BenchResult&, double) {});
+        if (rc != BENCH_OK) {
+            if (o.json) std::printf("]}\n");
+            report_error(rc, s);
+            return 1;
+        }
+        all_ok = all_ok && m.ok;
+        std::vector<double> ops;
+        for (const auto& r : m.results) ops.push_back(r.ops_per_sec);
+        const double total = median(ops);
+        if (t == 1) {
+            base = total;
+            if (!o.json) {
+                std::printf("Unit     : %s/s (all threads together)\n\n", m.display.raw_unit.c_str());
+                std::printf("%7s %-7s %16s %9s %11s %8s  %s\n", "Threads", "Added", "Throughput", "Speedup",
+                            "Efficiency", "CV", "Check");
+            }
+        }
+        const double speedup = base > 0 ? total / base : 0.0;
+        const double eff = speedup / double(t);
+        const std::string core = added_core(t);
+        if (o.json) {
+            std::printf("%s{\"threads\":%u,\"added_core\":%s,\"ops_per_sec\":%.3f,\"unit\":%s,\"speedup\":%.4f,"
+                        "\"efficiency\":%.4f,\"cv_percent\":%.3f,\"checksum_ok\":%s}",
+                        t == 1 ? "" : ",", t, json_str(core).c_str(), total, json_str(m.display.raw_unit).c_str(),
+                        speedup, eff, m.cv, m.ok ? "true" : "false");
+        } else {
+            std::printf("%7u %-7s %16.0f %8.2fx %10.0f%% %7.2f%%  %s%s\n", t, core.c_str(), total, speedup,
+                        100.0 * eff, m.cv, m.ok ? "ok" : "MISMATCH", m.cv > kCvWarnPercent ? "  (unstable)" : "");
+            std::fflush(stdout);
+        }
+    }
+    if (o.json) {
+        std::printf("],\"checksum_ok\":%s}\n", all_ok ? "true" : "false");
+    } else {
+        print_session_warnings(s);
+        if (!all_ok) std::printf("Checksum mismatch detected - results are not trustworthy\n");
+    }
+    return all_ok ? 0 : 3;
+}
+
 // ---------------------------------------------------------------- score
 
 // 점수 체계 v1: 싱글·멀티 점수. 항목·기준값은 score.h
@@ -1029,6 +1119,7 @@ int wmain(int argc, wchar_t** argv) {
     if (cmd == L"info") return cmd_info(argc > 2 && std::wstring(argv[2]) == L"--json");
     if (cmd == L"run") return cmd_run(argc, argv);
     if (cmd == L"sweep") return cmd_sweep(argc, argv);
+    if (cmd == L"scale") return cmd_scale(argc, argv);
     if (cmd == L"check") return cmd_check(argc, argv);
     if (cmd == L"throttle") return cmd_throttle(argc, argv);
     if (cmd == L"score") return cmd_score(argc, argv);
