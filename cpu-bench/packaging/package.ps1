@@ -80,7 +80,7 @@ PowerShell에서 ``Get-FileHash .\$name-win-x64.zip`` 결과가 위 값과 같�
 |---|---|
 $($files -join "`n")
 
-- 측정 결과는 이 PC에만 저장하고 어디에도 보내지 않습니다. 켤 때 GitHub에 최신 버전 번호만 물어봅니다(화면 아래에서 끌 수 있음).
+- PC 측정 결과는 이 PC에만 저장하고 어디에도 보내지 않습니다. 켤 때 GitHub에 최신 버전 번호만 물어봅니다(화면 아래에서 끌 수 있음). [인터넷 속도]를 누르고 동의할 때만 M-Lab과 통신하며, 그 속도 결과와 공인 IP는 M-Lab 공개 데이터로 남습니다.
 - 버그 신고·기능 요청: [Issues](https://github.com/song-circle/devlog-kr/issues) · 개발 과정 영상: [버그로그](https://www.youtube.com/@buglog_kr)
 "@
 [IO.File]::WriteAllText((Join-Path $dist 'release-notes.md'), $notes, (New-Object Text.UTF8Encoding $false))
