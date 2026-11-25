@@ -14,7 +14,7 @@ public partial class MainWindow : Window
     private readonly AppSettings _settings = AppSettings.Load();
     private string? _updateUrl;
     // 요약에 쓰는 가장 최근 결과 (앱을 다시 켜면 저장된 결과에서 읽음)
-    private JsonElement? _info, _check, _score, _throttle, _internet, _fp;
+    private JsonElement? _info, _check, _score, _throttle, _internet, _fp, _multi;
 
     // 점수 항목 키 → 화면 이름
     private static readonly Dictionary<string, string> ItemNames = new()
@@ -40,6 +40,8 @@ public partial class MainWindow : Window
             _internet = _store.LoadLatest("internet");
             _fp = _store.LoadLatest("fp");
             if (_fp is JsonElement fp) ShowFp(fp);
+            _multi = _store.LoadLatest("multicore");
+            if (_multi is JsonElement mc) ShowMulti(mc);
             if (_check is JsonElement c) ShowFindings(Diagnosis.FromCheck(c), f => !f.Title.Contains("쓰로틀링"));
             if (_throttle is JsonElement t) ShowFindings(new[] { Diagnosis.FromThrottle(t) }, f => f.Title.Contains("쓰로틀링"));
             if (_score is JsonElement sc) ShowScore(sc);
@@ -78,7 +80,7 @@ public partial class MainWindow : Window
         if (_runner is null)
         {
             CpuText.Text = "cpu-bench-runner.exe를 찾지 못했습니다. 앱과 같은 폴더에 있어야 합니다.";
-            FullButton.IsEnabled = CheckButton.IsEnabled = ScoreButton.IsEnabled = ThrottleButton.IsEnabled = FpButton.IsEnabled = false;
+            FullButton.IsEnabled = CheckButton.IsEnabled = ScoreButton.IsEnabled = ThrottleButton.IsEnabled = FpButton.IsEnabled = MultiButton.IsEnabled = false;
             return;
         }
         var r = await _runner.RunAsync("info --json");
@@ -103,7 +105,7 @@ public partial class MainWindow : Window
 
     private void SetBusy(bool busy, string status)
     {
-        FullButton.IsEnabled = CheckButton.IsEnabled = ScoreButton.IsEnabled = ThrottleButton.IsEnabled = NetButton.IsEnabled = FpButton.IsEnabled = !busy;
+        FullButton.IsEnabled = CheckButton.IsEnabled = ScoreButton.IsEnabled = ThrottleButton.IsEnabled = NetButton.IsEnabled = FpButton.IsEnabled = MultiButton.IsEnabled = !busy;
         Progress.Visibility = busy ? Visibility.Visible : Visibility.Hidden;
         Progress.IsIndeterminate = busy;
         StatusText.Text = status;
@@ -323,6 +325,112 @@ public partial class MainWindow : Window
         FpWords.Text = (allOk ? "" : "⚠ 계산 결과가 기대값과 달랐습니다. 오버클럭이나 메모리 설정이 불안정할 수 있습니다.\n") +
                        (variant == "avx2" ? "이 CPU는 AVX2(한 번에 실수 4개 계산)로 쟀습니다." : "이 CPU는 AVX2가 없어 일반 방식으로 쟀습니다.") +
                        " 1회 = 128×128 행렬곱 한 번 / 물체 256개의 인력 한 번 계산. 다른 PC와 비교하는 기능은 아직 없습니다.";
+    }
+
+    // 멀티코어: 확장 곡선(정수 측정을 스레드 1→N) + 동기화 측정(모든 스레드). 점수 v1에는 넣지 않는다.
+    private static readonly (string Workload, string Label, string Unit)[] SyncRuns =
+    {
+        ("padded", "각자 자기 변수에 +1 (서로 떨어뜨려 둠)", "회/초"),
+        ("falseshare", "각자 자기 변수에 +1 (바로 옆에 붙여 둠)", "회/초"),
+        ("shared", "모두 변수 하나에 +1", "회/초"),
+        ("queue", "작업 큐에 넣고 빼기", "개/초"),
+    };
+
+    private async void MultiButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_runner is null) return;
+        SetBusy(true, "멀티코어 측정 중… 1/2 확장 곡선 (스레드를 하나씩 늘려 가며, 약 40초)");
+        var s = await _runner.RunAsync("scale int --duration-ms 500 --runs 3 --json");
+        if (s.Json is null)
+        {
+            SetBusy(false, $"멀티코어 측정 실패: {s.StdErr.Trim()}");
+            return;
+        }
+        var scale = s.Json.RootElement.Clone();
+        Progress.IsIndeterminate = false;
+        var sync = new List<object>();
+        for (int i = 0; i < SyncRuns.Length; ++i)
+        {
+            var (w, label, _) = SyncRuns[i];
+            Progress.Value = (double)i / SyncRuns.Length;
+            StatusText.Text = $"멀티코어 측정 중… 2/2 동기화 {i + 1}/{SyncRuns.Length} {label}";
+            var r = await _runner.RunAsync($"run mt --workload {w} --mt --runs 3 --duration-ms 1000 --json");
+            if (r.Json is null)
+            {
+                SetBusy(false, $"멀티코어 측정 실패: {r.StdErr.Trim()}");
+                return;
+            }
+            var j = r.Json.RootElement;
+            sync.Add(new
+            {
+                workload = w, threads = j.GetProperty("threads").GetInt32(),
+                ops_per_sec = j.GetProperty("median_ops_per_sec").GetDouble(),
+                cv = j.GetProperty("cv_percent").GetDouble(), checksum_ok = j.GetProperty("checksum_ok").GetBoolean(),
+            });
+        }
+        var json = JsonSerializer.SerializeToElement(new { version = 1, scale, sync });
+        _store.Save("multicore", json);
+        _multi = json;
+        ShowMulti(json);
+        SetBusy(false, "멀티코어 측정 완료");
+    }
+
+    private static readonly Brush BlueBrush = new SolidColorBrush(Color.FromRgb(0x79, 0xC0, 0xFF));
+    private static readonly Brush GoodBrush = new SolidColorBrush(Color.FromRgb(0x3F, 0xB9, 0x50));
+    private static readonly Brush AccentBrush = new SolidColorBrush(Color.FromRgb(0xE8, 0x87, 0x5F));
+
+    private void ShowMulti(JsonElement j)
+    {
+        MultiHint.Visibility = Visibility.Collapsed;
+        var points = j.GetProperty("scale").GetProperty("points").EnumerateArray().Select(p => (
+            T: p.GetProperty("threads").GetInt32(),
+            Core: p.GetProperty("added_core").GetString() ?? "",
+            Ops: p.GetProperty("ops_per_sec").GetDouble(),
+            Speedup: p.GetProperty("speedup").GetDouble(),
+            Ok: p.GetProperty("checksum_ok").GetBoolean())).ToList();
+        if (points.Count == 0) return;
+        double max = Math.Max(1, points.Max(p => p.Speedup));
+        ScaleBars.ItemsSource = points.Select(p => new
+        {
+            Threads = p.T,
+            Height = Math.Max(2, p.Speedup / max * 128),
+            Brush = p.Core.Contains("SMT") ? AccentBrush : p.Core.StartsWith("E") ? BlueBrush : GoodBrush,
+            Tip = $"스레드 {p.T}개: {p.Speedup:F2}배 ({p.Ops:N0}/초)",
+        }).ToList();
+        ScaleLegend.Visibility = Visibility.Visible;
+
+        // 코어 종류별로 나눠 말로 설명: 성능(또는 일반) 코어 → 효율 코어 → 하이퍼스레딩
+        double o(int t) => points.First(p => p.T == t).Ops;
+        int nP = points.Count(p => !p.Core.Contains("SMT") && !p.Core.StartsWith("E") && !p.Core.EndsWith("+"));
+        int nE = points.Count(p => p.Core.StartsWith("E") && !p.Core.Contains("SMT"));
+        int nS = points.Count(p => p.Core.Contains("SMT") && !p.Core.EndsWith("+"));
+        double one = o(1);
+        var parts = new List<string>();
+        bool hybrid = nE > 0;
+        if (nP > 0) parts.Add($"{(hybrid ? "성능 코어" : "코어")} {nP}개까지 {o(nP) / one:F1}배");
+        if (nE > 0) parts.Add($"효율 코어 하나 ≈ 성능 코어의 {(o(nP + nE) - o(nP)) / nE / one * 100:F0}%");
+        if (nS > 0) parts.Add($"하이퍼스레딩 하나 ≈ 코어의 {(o(nP + nE + nS) - o(nP + nE)) / nS / one * 100:F0}%");
+        var last = points[^1];
+        ScaleWords.Text = $"스레드 {last.T}개 → {last.Speedup:F1}배 (스레드 1개 대비, 정수 계산). " + string.Join(" · ", parts) + ".";
+
+        var sync = j.GetProperty("sync").EnumerateArray().ToList();
+        double v(string w) => sync.Where(x => x.GetProperty("workload").GetString() == w)
+                                  .Select(x => x.GetProperty("ops_per_sec").GetDouble()).FirstOrDefault();
+        SyncItems.ItemsSource = sync.Select(x =>
+        {
+            string w = x.GetProperty("workload").GetString() ?? "";
+            var run = SyncRuns.FirstOrDefault(r => r.Workload == w);
+            string value = x.GetProperty("checksum_ok").GetBoolean()
+                ? $"{x.GetProperty("ops_per_sec").GetDouble() / 1e6:N1}백만 {run.Unit}" : "계산 오류";
+            return new { Label = run.Label ?? w, Value = value };
+        }).ToList();
+        bool allOk = points.All(p => p.Ok) && sync.All(x => x.GetProperty("checksum_ok").GetBoolean());
+        int threads = sync.Count > 0 ? sync[0].GetProperty("threads").GetInt32() : last.T;
+        double fs = v("falseshare") > 0 ? v("padded") / v("falseshare") : 0;
+        MultiWords.Text = (allOk ? "" : "⚠ 측정이 끝난 뒤 합계가 맞지 않았습니다. 오버클럭이나 메모리 설정이 불안정할 수 있습니다.\n") +
+            $"동기화는 스레드 {threads}개로 잽니다. " +
+            (fs > 0 ? $"자기 변수만 쓰는데도 서로 붙어 있으면 {fs:F0}배 느립니다(거짓 공유: CPU는 메모리를 64바이트 단위로 주고받음). " : "") +
+            "1스레드 값이 실행마다 10% 가까이 흔들릴 수 있어 배수는 대략으로 보세요. 다른 PC와 비교하는 기능은 아직 없습니다.";
     }
 
     private async Task<bool> RunThrottleAsync(string step)

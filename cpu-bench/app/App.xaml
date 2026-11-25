@@ -11,6 +11,7 @@
         <SolidColorBrush x:Key="Accent" Color="#E8875F" />
         <SolidColorBrush x:Key="Good" Color="#3FB950" />
         <SolidColorBrush x:Key="Bad" Color="#F85149" />
+        <SolidColorBrush x:Key="Blue" Color="#79C0FF" />
 
         <Style TargetType="TextBlock">
             <Setter Property="Foreground" Value="{StaticResource Text}" />
