@@ -25,6 +25,16 @@ add_test(NAME runner_fp_nbody_mt COMMAND cpu-bench-runner run fp --workload nbod
 add_test(NAME runner_fp_scalar COMMAND cpu-bench-runner run fp --workload matmul --duration-ms 200 --runs 2)
 set_tests_properties(runner_fp_scalar PROPERTIES ENVIRONMENT "CPU_BENCH_FP_PATH=scalar")
 
+# 동기화 모듈: lock-free 큐 단위 테스트 + 측정 종류마다 짧게 실행(합계 검사가 틀리면 종료 코드 3)
+add_executable(mt_kernels_test mt_kernels_test.cpp)
+target_link_libraries(mt_kernels_test PRIVATE mt_kernels bench_options)
+add_test(NAME mt_kernels COMMAND mt_kernels_test)
+add_test(NAME runner_mt_shared COMMAND cpu-bench-runner run mt --workload shared --mt --duration-ms 200 --runs 2)
+add_test(NAME runner_mt_padded COMMAND cpu-bench-runner run mt --workload padded --mt --duration-ms 200 --runs 2)
+add_test(NAME runner_mt_falseshare COMMAND cpu-bench-runner run mt --workload falseshare --mt --duration-ms 200 --runs 2)
+add_test(NAME runner_mt_queue COMMAND cpu-bench-runner run mt --workload queue --mt --duration-ms 200 --runs 2 --json)
+add_test(NAME runner_mt_queue_st COMMAND cpu-bench-runner run mt --workload queue --duration-ms 200 --runs 2)
+
 # SMBIOS 메모리 정보 해석 (직접 만든 표로 확인)
 add_executable(smbios_test smbios_test.cpp ${CMAKE_SOURCE_DIR}/runner/smbios.cpp)
 target_include_directories(smbios_test PRIVATE ${CMAKE_SOURCE_DIR}/runner)

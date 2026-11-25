@@ -43,6 +43,7 @@ target_link_libraries(bench_harness INTERFACE bench_api)
 add_subdirectory(modules/int)
 add_subdirectory(modules/mem)
 add_subdirectory(modules/fp)
+add_subdirectory(modules/mt)
 add_subdirectory(runner)
 
 include(CTest)
