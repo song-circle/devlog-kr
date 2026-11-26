@@ -24,6 +24,10 @@ public partial class MainWindow : Window
         ["mem_lat_st"] = "메모리 지연 (싱글)",
         ["int_mt"] = "정수 (멀티)",
         ["mem_bw_mt"] = "메모리 읽기 (멀티)",
+        ["fp_matmul_st"] = "행렬곱 (싱글)",
+        ["fp_nbody_st"] = "물체 인력 계산 (싱글)",
+        ["fp_matmul_mt"] = "행렬곱 (멀티)",
+        ["fp_nbody_mt"] = "물체 인력 계산 (멀티)",
     };
 
     public MainWindow()
@@ -147,7 +151,7 @@ public partial class MainWindow : Window
     {
         if (_runner is null) return;
         var ok = MessageBox.Show(this,
-            "약 2분 30초 걸립니다.\n\n1. 환경 점검 (3초)\n2. 점수 측정 (1분 남짓)\n3. 발열 검사 (1분): 모든 코어에 부하를 걸어서 팬 소리가 커지고 PC가 따뜻해질 수 있습니다.\n\n정확한 결과를 위해 그동안 다른 프로그램은 잠시 쉬게 해 주세요.",
+            "약 3분 30초 걸립니다.\n\n1. 환경 점검 (3초)\n2. 점수 측정 (약 2분)\n3. 발열 검사 (1분): 모든 코어에 부하를 걸어서 팬 소리가 커지고 PC가 따뜻해질 수 있습니다.\n\n정확한 결과를 위해 그동안 다른 프로그램은 잠시 쉬게 해 주세요.",
             "전체 점검", MessageBoxButton.OKCancel, MessageBoxImage.Information);
         if (ok != MessageBoxResult.OK) return;
         if (!await RunCheckAsync("1/3 ")) return;
@@ -269,7 +273,7 @@ public partial class MainWindow : Window
              : retries > 0 ? $" · 다른 프로그램 때문에 {retries}회를 다시 쟀습니다." : "";
     }
 
-    // 부동소수점 측정: 행렬곱·N-body를 싱글·멀티로. 점수 v1에는 넣지 않고 따로 보여 준다.
+    // 부동소수점 측정: 행렬곱·N-body를 싱글·멀티로. 점수 v2에도 같은 항목이 들어가고, 이 카드는 이것만 따로 잰다.
     private static readonly (string Workload, bool Multi, string Label)[] FpRuns =
     {
         ("matmul", false, "행렬곱 (싱글)"), ("nbody", false, "물체 인력 계산 (싱글)"),
@@ -327,7 +331,7 @@ public partial class MainWindow : Window
                        " 1회 = 128×128 행렬곱 한 번 / 물체 256개의 인력 한 번 계산. 다른 PC와 비교하는 기능은 아직 없습니다.";
     }
 
-    // 멀티코어: 확장 곡선(정수 측정을 스레드 1→N) + 동기화 측정(모든 스레드). 점수 v1에는 넣지 않는다.
+    // 멀티코어: 확장 곡선(정수 측정을 스레드 1→N) + 동기화 측정(모든 스레드). 점수에는 넣지 않는다(동기화는 코어가 많을수록 값이 낮아짐).
     private static readonly (string Workload, string Label, string Unit)[] SyncRuns =
     {
         ("padded", "각자 자기 변수에 +1 (서로 떨어뜨려 둠)", "회/초"),
@@ -452,7 +456,7 @@ public partial class MainWindow : Window
         var list = _store.LoadScores(10);
         History.ItemsSource = list.Select(h => new
         {
-            When = $"{h.When:yyyy-MM-dd HH:mm}  (v{h.Version})",
+            When = $"{h.When:yyyy-MM-dd HH:mm}  (v{h.Version}{(h.Version < 2 ? ", 실수 계산 미포함" : "")})",
             Single = h.Valid ? $"싱글 {h.Single:0}" : "무효",
             Multi = h.Valid ? $"멀티 {h.Multi:0}" : "",
         }).ToList();

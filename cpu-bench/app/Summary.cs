@@ -70,7 +70,7 @@ public static class Summary
         int warn = cards.Count(c => c.State == "warn");
         int none = cards.Count(c => c.State == "none");
         if (none == cards.Count)
-            return ("none", "아직 점검하지 않았습니다. '전체 점검'을 누르면 2분 30초쯤 걸립니다.", cards.Append(internetCard).ToList());
+            return ("none", "아직 점검하지 않았습니다. '전체 점검'을 누르면 3분 30초쯤 걸립니다.", cards.Append(internetCard).ToList());
         if (warn > 0)
             return ("warn", $"성능을 다 못 내게 할 수 있는 것이 {warn}가지 있습니다", cards.Append(internetCard).ToList());
         if (none > 0)
