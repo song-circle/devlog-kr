@@ -4,7 +4,7 @@
 //   cpu-bench-runner check [--seconds N] [--json]   측정 전 환경 점검
 //   cpu-bench-runner clock [--json]                 코어별 유효 클럭
 //   cpu-bench-runner throttle [--seconds N] [--threads N | --mt] [--json]   지속 부하 중 클럭·처리량 변화
-//   cpu-bench-runner score [--runs N] [--duration-ms N] [--json]            점수(싱글·멀티, 점수 체계 v1)
+//   cpu-bench-runner score [--runs N] [--duration-ms N] [--json]            점수(싱글·멀티, 점수 체계 v2)
 //   cpu-bench-runner run <module id | dll 경로> [--workload W] [--size N] [--threads N | --mt]
 //                        [--duration-ms N] [--runs N] [--seed N] [--no-pin] [--json]
 //   cpu-bench-runner sweep <module> [--workload W] [--from N] [--to N] [측정 옵션...]
@@ -608,6 +608,7 @@ struct Measurement {
     std::vector<double> others;  // 회차마다 다른 프로그램이 쓴 CPU %
     std::vector<double> clocks;  // 싱글 측정: 회차 직후 그 코어의 유효 클럭(GHz), 멀티는 0
     std::vector<double> clocks_during;  // 싱글 측정: 회차 도중 그 코어의 평균 유효 클럭(성능 카운터, GHz), 못 재면 0
+    std::vector<double> siblings;       // 싱글 측정: 회차 도중 같은 코어의 하이퍼스레딩 짝 사용률(%), 모르면 -1
     std::vector<std::string> tops;      // 회차마다 CPU를 많이 쓴 다른 프로그램 상위 3개 ("name 1.2%, ...")
     std::vector<std::pair<double, std::string>> rejected;  // 방해로 버린 회차: (다른 프로그램 %, 상위 3개)
     Display display;
@@ -616,13 +617,16 @@ struct Measurement {
     bool ok = false;  // 회차 간 checksum 같음 + 불일치 0
     uint32_t retries = 0;      // 방해 때문에 다시 잰 횟수
     double others_max = 0;     // 채택한 회차 중 다른 프로그램 사용률 최댓값
+    double sibling_max = -1;   // 채택한 회차 중 하이퍼스레딩 짝 사용률 최댓값(싱글만, 모르면 -1)
 };
 
 // 다른 프로그램이 max_others_percent를 넘게 CPU를 쓴 회차는 버리고 다시 잰다(최대 max_retries번).
 // 기본값(음수)이면 다시 재지 않는다.
+// 싱글 측정은 같은 물리 코어의 하이퍼스레딩 짝이 max_sibling_percent를 넘게 바빴던 회차도 다시 잰다(버그 018).
 struct RetryPolicy {
     double max_others_percent = -1;
     uint32_t max_retries = 0;
+    double max_sibling_percent = -1;
 };
 
 template <class OnRun>
@@ -632,12 +636,22 @@ int32_t measure(const Module& mod, const BenchConfig& cfg, uint32_t runs, Measur
     int32_t rc = mod.init(&cfg, &ctx);
     if (rc != BENCH_OK) return rc;
     int32_t worst = BENCH_OK;
-    // 싱글 측정: 이 스레드가 0번 워커이고 성능 코어에 고정돼 있다 → 이 코어의 클럭을 회차 도중 내내 본다
+    // 싱글 측정: 0번 워커는 고정 계획의 첫 논리 CPU(성능 코어)에 고정된다 → 그 CPU의 클럭을 회차 도중 내내 본다.
+    // 버그 018 전에는 이 스레드가 지금 돌고 있는 CPU(GetCurrentProcessorNumberEx)를 봤는데, 이 스레드는 고정되지 않아서
+    // 실제로 측정하는 코어가 아니라 그때그때 다른 코어의 클럭을 읽고 있었다.
+    // 같은 물리 코어의 하이퍼스레딩 짝이 바쁘면 AVX2 행렬곱 싱글이 절반 가까이 떨어지므로 짝의 사용률도 본다.
     ClockWatch watch;
-    if (cfg.threads == 1) {
-        PROCESSOR_NUMBER pn{};
-        GetCurrentProcessorNumberEx(&pn);
-        watch.open(pn.Group, pn.Number);
+    if (cfg.threads == 1 && cfg.thread_init == &on_thread_init && cfg.user) {
+        const auto* plan = static_cast<const PinPlan*>(cfg.user);
+        if (plan->enabled && !plan->order.empty()) {
+            const LogicalCpu& me = plan->order[0];
+            watch.open(me.group, me.number);
+            for (const auto& c : plan->order)
+                if (c.core == me.core && (c.group != me.group || c.number != me.number)) {
+                    watch.add_sibling(c.group, c.number);
+                    break;
+                }
+        }
     }
     auto top_text = [](const ProcessSnapshot& a, const ProcessSnapshot& b) {
         std::string t;
@@ -656,6 +670,7 @@ int32_t measure(const Module& mod, const BenchConfig& cfg, uint32_t runs, Measur
         watch.begin();
         rc = mod.run(ctx, &res, nullptr, nullptr, nullptr);
         const double clock_during = cfg.threads == 1 ? watch.end_ghz() : 0.0;
+        const double sibling = cfg.threads == 1 ? watch.sibling_busy_percent() : -1.0;
         const double others = other_cpu_percent(before, sample_cpu());
         const ProcessSnapshot snap_b = take_process_snapshot();
         // 싱글 측정은 이 스레드(성능 코어에 고정됨)가 0번 워커라, 끝나자마자 같은 코어의 클럭을 잴 수 있다.
@@ -669,8 +684,16 @@ int32_t measure(const Module& mod, const BenchConfig& cfg, uint32_t runs, Measur
         }
         if (rc == BENCH_E_CHECKSUM) worst = rc;
         if (r == 0) continue;
-        if (policy.max_others_percent >= 0 && others > policy.max_others_percent && m.retries < policy.max_retries) {
-            m.rejected.push_back({others, top_text(snap_a, snap_b)});
+        const bool busy_others = policy.max_others_percent >= 0 && others > policy.max_others_percent;
+        const bool busy_sibling = policy.max_sibling_percent >= 0 && sibling > policy.max_sibling_percent;
+        if ((busy_others || busy_sibling) && m.retries < policy.max_retries) {
+            std::string why = top_text(snap_a, snap_b);
+            if (busy_sibling) {
+                char buf[64];
+                std::snprintf(buf, sizeof(buf), "%sSMT sibling %.0f%%", why.empty() ? "" : ", ", sibling);
+                why += buf;
+            }
+            m.rejected.push_back({others, why});
             ++m.retries;  // 이 회차는 버리고 같은 번호로 다시
             --r;
             continue;
@@ -682,6 +705,8 @@ int32_t measure(const Module& mod, const BenchConfig& cfg, uint32_t runs, Measur
         m.others.push_back(others);
         m.clocks.push_back(clock_ghz);
         m.clocks_during.push_back(clock_during);
+        m.siblings.push_back(sibling);
+        m.sibling_max = std::max(m.sibling_max, sibling);
         m.tops.push_back(top_text(snap_a, snap_b));
         on_run(r, res, m.values.back());
     }
@@ -787,9 +812,11 @@ int cmd_run(int argc, wchar_t** argv) {
         if (o.json) return;
         if (r == 1 && !s.workload.empty())
             std::printf("Workload : %s, %s\n", s.workload.c_str(), format_size(res.working_set_bytes).c_str());
-        std::printf("  run %u  : %12.2f %-6s (%llu %ss, %.3f s)%s\n", r, v, m.display.unit.c_str(),
+        std::printf("  run %u  : %12.2f %-6s (%llu %ss, %.3f s)%s", r, v, m.display.unit.c_str(),
                     static_cast<unsigned long long>(res.iterations), m.display.raw_unit.c_str(), res.elapsed_s,
                     res.mismatches ? "  CHECKSUM MISMATCH" : "");
+        if (!m.siblings.empty() && m.siblings.back() >= 0) std::printf("  [SMT sibling busy %.0f%%]", m.siblings.back());
+        std::printf("\n");
     });
     if (rc != BENCH_OK) {
         report_error(rc, s);
@@ -813,10 +840,10 @@ int cmd_run(int argc, wchar_t** argv) {
             ops.push_back(r.ops_per_sec);
             std::printf("%s{\"ops_per_sec\":%.3f,\"value\":%.4f,\"iterations\":%llu,\"elapsed_s\":%.6f,"
                         "\"mismatches\":%llu,\"others_cpu_percent\":%.2f,\"clock_ghz\":%.3f,\"clock_during_ghz\":%.3f,"
-                        "\"others_top\":%s}",
+                        "\"sibling_busy_percent\":%.2f,\"others_top\":%s}",
                         i ? "," : "", r.ops_per_sec, m.values[i], static_cast<unsigned long long>(r.iterations),
                         r.elapsed_s, static_cast<unsigned long long>(r.mismatches), m.others[i], m.clocks[i],
-                        m.clocks_during[i], json_str(m.tops[i]).c_str());
+                        m.clocks_during[i], m.siblings[i], json_str(m.tops[i]).c_str());
         }
         std::printf("],\"median_ops_per_sec\":%.3f,\"median_value\":%.4f,\"cv_percent\":%.3f,"
                     "\"checksum\":\"0x%016llx\",\"checksum_ok\":%s}\n",
@@ -992,12 +1019,15 @@ int cmd_scale(int argc, wchar_t** argv) {
 
 // ---------------------------------------------------------------- score
 
-// 점수 체계 v1: 싱글·멀티 점수. 항목·기준값은 score.h
+// 점수 체계 v2: 싱글·멀티 점수. 항목·기준값은 score.h (v2에서 부동소수점 행렬곱·N-body 추가)
 // 측정 절차: 항목마다 워밍업 1회 + 5회, 중앙값. 다른 프로그램이 CPU를 7% 넘게 쓴 회차는 버리고 다시 잰다
 // (항목당 최대 5번). 싱글 메모리 읽기가 가끔 10% 떨어지는 회차 때문에 3회 중앙값으로는 싱글 점수가 흔들렸다(조사 006).
 // 통제 실험: 바쁜 프로그램 하나만 띄워도 싱글 정수가 평균 2.8% 떨어졌고, 그때 다른 프로그램 사용률은 평균 10.6%였다.
 constexpr double kScoreMaxOthersPercent = 7.0;  // 개발 PC 평소 3%대, 바쁜 프로그램 하나(16개 중 1개)면 10% 안팎 → 그 경우를 걸러 낸다
 constexpr uint32_t kScoreMaxRetries = 5;
+// 싱글 측정 코어의 하이퍼스레딩 짝: 개발 PC 평소 0~5%. 짝이 100% 바쁘면 AVX2 행렬곱 싱글이 약 10,000 → 5,700으로
+// 떨어지는데(버그 018), 전체 다른 프로그램 사용률로는 1/16밖에 안 보여서 7% 기준에 걸리지 않았다.
+constexpr double kScoreMaxSiblingPercent = 10.0;
 
 int cmd_score(int argc, wchar_t** argv) {
     uint32_t runs = 5, duration_ms = 2000;
@@ -1020,7 +1050,7 @@ int cmd_score(int argc, wchar_t** argv) {
     }
 
     struct Row {
-        const ScoreItem* item; double value; double ratio; std::string unit; uint64_t checksum; bool ok;
+        const ScoreItem* item; double value; double ratio; std::string unit; std::string variant; uint64_t checksum; bool ok;
         uint32_t retries; double others_max;
         Measurement m;  // 회차별 기록(값, 다른 프로그램, 도중 클럭, 버린 회차) → JSON
     };
@@ -1050,13 +1080,13 @@ int cmd_score(int argc, wchar_t** argv) {
         }
         Measurement m;
         int32_t rc = measure(s.mod, s.cfg, o.runs, m, [](uint32_t, const BenchResult&, double) {},
-                             RetryPolicy{kScoreMaxOthersPercent, kScoreMaxRetries});
+                             RetryPolicy{kScoreMaxOthersPercent, kScoreMaxRetries, kScoreMaxSiblingPercent});
         if (rc != BENCH_OK) {
             report_error(rc, s);
             return 1;
         }
         const double ratio = score_ratio(it, m.median);
-        rows.push_back({&it, m.median, ratio, m.display.unit, m.results.front().checksum, m.ok, m.retries, m.others_max, m});
+        rows.push_back({&it, m.median, ratio, m.display.unit, m.results.front().variant, m.results.front().checksum, m.ok, m.retries, m.others_max, m});
         all_ok = all_ok && m.ok;
         if (!json) {
             std::printf("%10.2f %-6s (reference %g, x%.3f)%s", m.median, m.display.unit.c_str(), it.reference, ratio,
@@ -1072,21 +1102,24 @@ int cmd_score(int argc, wchar_t** argv) {
 
     if (json) {
         bool disturbed = false;  // 다시 재기를 다 써도 방해가 남은 항목이 있음
-        for (const auto& r : rows) disturbed = disturbed || r.others_max > kScoreMaxOthersPercent;
+        for (const auto& r : rows)
+            disturbed = disturbed || r.others_max > kScoreMaxOthersPercent || r.m.sibling_max > kScoreMaxSiblingPercent;
         std::printf("{\"score_version\":%d,\"cpu\":%s,\"single\":%.0f,\"multi\":%.0f,\"valid\":%s,\"disturbed\":%s,"
                     "\"max_others_percent\":%g,\"items\":[",
                     kScoreVersion, json_str(cpu).c_str(), st_score, mt_score, all_ok ? "true" : "false",
                     disturbed ? "true" : "false", kScoreMaxOthersPercent);
         for (size_t i = 0; i < rows.size(); ++i) {
             std::printf("%s{\"key\":%s,\"value\":%.4f,\"unit\":%s,\"reference\":%g,\"ratio\":%.4f,\"checksum\":\"0x%016llx\","
-                        "\"checksum_ok\":%s,\"retries\":%u,\"others_max_percent\":%.2f,\"runs\":[",
+                        "\"variant\":%s,\"checksum_ok\":%s,\"retries\":%u,\"others_max_percent\":%.2f,\"runs\":[",
                         i ? "," : "", json_str(rows[i].item->key).c_str(), rows[i].value, json_str(rows[i].unit).c_str(),
                         rows[i].item->reference, rows[i].ratio, static_cast<unsigned long long>(rows[i].checksum),
-                        rows[i].ok ? "true" : "false", rows[i].retries, rows[i].others_max);
+                        json_str(rows[i].variant).c_str(), rows[i].ok ? "true" : "false", rows[i].retries, rows[i].others_max);
             const Measurement& m = rows[i].m;
             for (size_t k = 0; k < m.values.size(); ++k)
-                std::printf("%s{\"value\":%.4f,\"others_cpu_percent\":%.2f,\"clock_ghz\":%.3f,\"clock_during_ghz\":%.3f,\"others_top\":%s}",
-                            k ? "," : "", m.values[k], m.others[k], m.clocks[k], m.clocks_during[k], json_str(m.tops[k]).c_str());
+                std::printf("%s{\"value\":%.4f,\"others_cpu_percent\":%.2f,\"clock_ghz\":%.3f,\"clock_during_ghz\":%.3f,"
+                            "\"sibling_busy_percent\":%.2f,\"others_top\":%s}",
+                            k ? "," : "", m.values[k], m.others[k], m.clocks[k], m.clocks_during[k], m.siblings[k],
+                            json_str(m.tops[k]).c_str());
             std::printf("],\"rejected\":[");
             for (size_t k = 0; k < m.rejected.size(); ++k)
                 std::printf("%s{\"others_cpu_percent\":%.2f,\"others_top\":%s}", k ? "," : "", m.rejected[k].first,

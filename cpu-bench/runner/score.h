@@ -1,4 +1,4 @@
-// 점수 체계 v1
+// 점수 체계 v2 (v1: 2026-11-17, 정수·메모리만 / v2: 2026-11-26, 부동소수점 행렬곱·N-body 추가)
 //
 // 기준은 특정 PC가 아니라 고정 상수다. 각 항목의 측정값을 기준값 대비 비율로 바꾸고,
 // 싱글·멀티 점수 각각 비율의 기하평균 × 1000을 점수로 한다.
@@ -12,7 +12,7 @@
 #include <cstdint>
 #include <vector>
 
-constexpr int kScoreVersion = 1;
+constexpr int kScoreVersion = 2;
 
 struct ScoreItem {
     const char* key;        // JSON 키 (예: "int_st")
@@ -25,7 +25,8 @@ struct ScoreItem {
     bool lower_is_better;   // 지연처럼 작을수록 좋은 항목
 };
 
-// v1 항목과 기준값
+// v2 항목과 기준값. v1 다섯 항목의 기준값은 그대로 두고 부동소수점 네 항목을 더했다.
+// 멀티코어 동기화(MT 모듈)는 코어가 많을수록 값이 낮아지는 측정이라 점수에 넣지 않는다(진단용).
 inline const std::vector<ScoreItem>& score_items() {
     static const std::vector<ScoreItem> items = {
         {"int_st", "Integer        ", "int", nullptr, 0, false, 1000.0, false},
@@ -33,6 +34,10 @@ inline const std::vector<ScoreItem>& score_items() {
         {"mem_lat_st", "Memory latency ", "mem", "latency", 256ull << 20, false, 100.0, true},
         {"int_mt", "Integer        ", "int", nullptr, 0, true, 10000.0, false},
         {"mem_bw_mt", "Memory read    ", "mem", "read", 256ull << 20, true, 50.0, false},
+        {"fp_matmul_st", "FP matmul      ", "fp", "matmul", 0, false, 5000.0, false},
+        {"fp_nbody_st", "FP n-body      ", "fp", "nbody", 0, false, 5000.0, false},
+        {"fp_matmul_mt", "FP matmul      ", "fp", "matmul", 0, true, 50000.0, false},
+        {"fp_nbody_mt", "FP n-body      ", "fp", "nbody", 0, true, 50000.0, false},
     };
     return items;
 }
